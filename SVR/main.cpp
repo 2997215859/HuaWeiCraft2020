@@ -625,8 +625,10 @@ std::vector<float> SVR::calc_q(int i, int len) {
 
     next_buffer = 1 - next_buffer;
     char si = sign[i];
-    for(int j=0;j<len;j++) buf[j] = (float) si * (float) sign[j] * data[index[j]];
 
+    // 这句代码中的负数char到float的互换在鲲鹏上触发了bug，因为-1的char转化为float时变成255导致
+//    for(int j=0;j<len;j++) buf[j] = (float) si * (float) sign[j] * data[index[j]];
+    for(int j=0;j<len;j++) buf[j] = (si == char(1)? 1: -1) * (sign[j] == char(1)? 1: -1) * data[index[j]];
     return buf;
 }
 
