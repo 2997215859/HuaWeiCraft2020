@@ -1,0 +1,9 @@
+##  env
+
+.idea/
+cmake-build-debug/
+
+## data
+
+data/result.txt
+modelweight.txt

@@ -4,6 +4,9 @@
 #include <fstream>
 #include <cmath>
 #include <cstdlib>
+#include <climits>
+#include <zconf.h>
+
 using namespace std;
 
 struct Data {
@@ -62,6 +65,28 @@ LR::LR(string trainF, string testF, string predictOutF)
     predictOutFile = predictOutF;
     featuresNum = 0;
     init();
+}
+
+std::string GetAbsPath(std::string relative_path) {
+    char abs_path_buff[PATH_MAX];
+    if (realpath(relative_path.c_str(), abs_path_buff)) {
+        return std::string(abs_path_buff);
+    }
+
+    printf("the file [%s] is not exist\n", relative_path.c_str());
+    exit(1);
+}
+
+inline std::string GetCwd() { //获取当前工作目录
+    return string(getcwd(nullptr, 0));
+}
+
+std::string GenAbsPath(std::string relative_path) {
+    if (relative_path.empty()) {
+        printf("relative_path is empty\n");
+        exit(-1);
+    }
+    return GetCwd() + relative_path;
 }
 
 bool LR::loadTrainData()
@@ -357,11 +382,18 @@ int main(int argc, char *argv[])
     vector<int> predictVec;
     int correctCount;
     double accurate;
+
+#ifdef OFFLINE // 线下测试用的数据路径
+    string trainFile = "./data/train_data.txt";
+    string testFile = "./data/test_data.txt";
+    string predictFile = "./data/result.txt";
+    string answerFile = "./data/answer.txt";
+#else // 提交到线上，官方要求的数据路径
     string trainFile = "/data/train_data.txt";
     string testFile = "/data/test_data.txt";
     string predictFile = "/projects/student/result.txt";
-
     string answerFile = "/projects/student/answer.txt";
+#endif
 
     LR logist(trainFile, testFile, predictFile);
 
@@ -371,15 +403,14 @@ int main(int argc, char *argv[])
     cout << "training ends, ready to store the model" << endl;
     logist.storeModel();
 
-#ifdef TEST
-    cout << "ready to load answer data" << endl;
-    loadAnswerData(answerFile, answerVec);
-#endif
-
     cout << "let's have a prediction test" << endl;
     logist.predict();
 
 #ifdef TEST
+    
+    cout << "ready to load answer data" << endl;
+    loadAnswerData(answerFile, answerVec);
+
     loadAnswerData(predictFile, predictVec);
     cout << "test data set size is " << predictVec.size() << endl;
     correctCount = 0;
