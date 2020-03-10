@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <climits>
-#include <zconf.h>
+
 
 using namespace std;
 
