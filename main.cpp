@@ -9,6 +9,10 @@
 
 using namespace std;
 
+///////////////////////////////
+///    LR Begin
+///////////////////////////////
+
 struct Data {
     vector<double> features;
     int label;
@@ -23,10 +27,11 @@ struct Param {
 class LR {
 public:
     void train();
-    void predict();
+    void predict(const vector<Data> & test_data_set);
     int loadModel();
     int storeModel();
-    LR(string trainFile, string testFile, string predictOutFile);
+    vector<int>  GetPredictVec();
+    LR(const vector<Data> & train_data_set);
 
 private:
     vector<Data> trainDataSet;
@@ -39,7 +44,6 @@ private:
     string weightParamFile = "modelweight.txt";
 
 private:
-    bool init();
     bool loadTrainData();
     bool loadTestData();
     int storePredict(vector<int> &predict);
@@ -58,102 +62,26 @@ private:
     const int train_show_step = 10;
 };
 
-LR::LR(string trainF, string testF, string predictOutF)
-{
-    trainFile = trainF;
-    testFile = testF;
-    predictOutFile = predictOutF;
-    featuresNum = 0;
-    init();
+LR::LR(const vector<Data> & train_data_set): trainDataSet(train_data_set) {
+    featuresNum = trainDataSet[0].features.size();
+    initParam();
 }
 
-std::string GetAbsPath(std::string relative_path) {
-    char abs_path_buff[PATH_MAX];
-    if (realpath(relative_path.c_str(), abs_path_buff)) {
-        return std::string(abs_path_buff);
-    }
-
-    printf("the file [%s] is not exist\n", relative_path.c_str());
-    exit(1);
+inline vector<int> LR::GetPredictVec() {
+    return predictVec;
 }
 
-inline std::string GetCwd() { //获取当前工作目录
-    return string(getcwd(nullptr, 0));
-}
-
-std::string GenAbsPath(std::string relative_path) {
-    if (relative_path.empty()) {
-        printf("relative_path is empty\n");
-        exit(-1);
-    }
-    return GetCwd() + relative_path;
-}
-
-bool LR::loadTrainData()
-{
-    ifstream infile(trainFile.c_str());
-    string line;
-
-    if (!infile) {
-        cout << "打开训练文件失败" << endl;
-        exit(0);
-    }
-
-    while (infile) {
-        getline(infile, line);
-        if (line.size() > featuresNum) {
-            stringstream sin(line);
-            char ch;
-            double dataV;
-            int i;
-            vector<double> feature;
-            i = 0;
-
-            while (sin) {
-                char c = sin.peek();
-                if (int(c) != -1) {
-                    sin >> dataV;
-                    feature.push_back(dataV);
-                    sin >> ch;
-                    i++;
-                } else {
-                    cout << "训练文件数据格式不正确，出错行为" << (trainDataSet.size() + 1) << "行" << endl;
-                    return false;
-                }
-            }
-            int ftf;
-            ftf = (int)feature.back();
-            feature.pop_back();
-            trainDataSet.push_back(Data(feature, ftf));
-        }
-    }
-    infile.close();
-    return true;
-}
 
 void LR::initParam()
 {
-    int i;
-    for (i = 0; i < featuresNum; i++) {
+    param.wtSet.clear();
+    for (int i = 0; i < featuresNum; i++) {
         param.wtSet.push_back(wtInitV);
     }
 }
 
-bool LR::init()
-{
-    trainDataSet.clear();
-    bool status = loadTrainData();
-    if (status != true) {
-        return false;
-    }
-    featuresNum = trainDataSet[0].features.size();
-    param.wtSet.clear();
-    initParam();
-    return true;
-}
 
-
-double LR::wxbCalc(const Data &data)
+double LR::wxbCalc(const Data & data)
 {
     double mulSum = 0.0L;
     int i;
@@ -204,8 +132,8 @@ double LR::gradientSlope(const vector<Data> &dataSet, int index, const vector<do
     return gsV;
 }
 
-void LR::train()
-{
+void LR::train() {
+
     double sigmoidVal;
     double wxbVal;
     int i, j;
@@ -233,48 +161,20 @@ void LR::train()
     }
 }
 
-void LR::predict()
+void LR::predict(const vector<Data> & test_train_data)
 {
+
+    testDataSet = test_train_data;
+
     double sigVal;
     int predictVal;
 
-    loadTestData();
-    for (int j = 0; j < testDataSet.size(); j++) {
-        sigVal = sigmoidCalc(wxbCalc(testDataSet[j]));
+    for (int j = 0; j < test_train_data.size(); j++) {
+        sigVal = sigmoidCalc(wxbCalc(test_train_data[j]));
         predictVal = sigVal >= predictTrueThresh ? 1 : 0;
         predictVec.push_back(predictVal);
     }
 
-    storePredict(predictVec);
-}
-
-int LR::loadModel()
-{
-    string line;
-    int i;
-    vector<double> wtTmp;
-    double dbt;
-
-    ifstream fin(weightParamFile.c_str());
-    if (!fin) {
-        cout << "打开模型参数文件失败" << endl;
-        exit(0);
-    }
-
-    getline(fin, line);
-    stringstream sin(line);
-    for (i = 0; i < featuresNum; i++) {
-        char c = sin.peek();
-        if (c == -1) {
-            cout << "模型参数数量少于特征数量，退出" << endl;
-            return -1;
-        }
-        sin >> dbt;
-        wtTmp.push_back(dbt);
-    }
-    param.wtSet.swap(wtTmp);
-    fin.close();
-    return 0;
 }
 
 int LR::storeModel()
@@ -296,48 +196,11 @@ int LR::storeModel()
     return 0;
 }
 
+///////////////////////////////
+///    LR end
+///////////////////////////////
 
-bool LR::loadTestData()
-{
-    ifstream infile(testFile.c_str());
-    string lineTitle;
-
-    if (!infile) {
-        cout << "打开测试文件失败" << endl;
-        exit(0);
-    }
-
-    while (infile) {
-        vector<double> feature;
-        string line;
-        getline(infile, line);
-        if (line.size() > featuresNum) {
-            stringstream sin(line);
-            double dataV;
-            int i;
-            char ch;
-            i = 0;
-            while (i < featuresNum && sin) {
-                char c = sin.peek();
-                if (int(c) != -1) {
-                    sin >> dataV;
-                    feature.push_back(dataV);
-                    sin >> ch;
-                    i++;
-                } else {
-                    cout << "测试文件数据格式不正确" << endl;
-                    return false;
-                }
-            }
-            testDataSet.push_back(Data(feature, 0));
-        }
-    }
-
-    infile.close();
-    return true;
-}
-
-bool loadAnswerData(string awFile, vector<int> &awVec)
+bool loadAnswerData(string awFile, vector<int> & awVec)
 {
     ifstream infile(awFile.c_str());
     if (!infile) {
@@ -360,14 +223,98 @@ bool loadAnswerData(string awFile, vector<int> &awVec)
     return true;
 }
 
-int LR::storePredict(vector<int> &predict)
+vector<Data> LoadTrainData(string train_file)
+{
+
+    ifstream infile(train_file.c_str());
+    string line;
+
+    if (!infile) {
+        cout << "打开训练文件失败" << endl;
+        exit(0);
+    }
+
+    vector<Data> train_data_set;
+    while (infile) {
+        getline(infile, line);
+        if (line.size() > 0) {
+            stringstream sin(line);
+            char ch;
+            double dataV;
+            int i = 0;
+            vector<double> feature;
+
+            while (sin) {
+                char c = sin.peek();
+                if (int(c) != -1) {
+                    sin >> dataV;
+                    feature.push_back(dataV);
+                    sin >> ch;
+                    i++;
+                } else {
+                    printf("训练文件数据格式不正确，出错行为[%d]行", train_data_set.size() + 1);
+                    exit(1);
+                }
+            }
+            int ftf = (int) feature.back();
+            feature.pop_back();
+            train_data_set.push_back(Data(feature, ftf));
+        }
+    }
+    infile.close();
+    return train_data_set;
+}
+
+
+vector<Data> LoadTestData(string test_file)
+{
+    ifstream infile(test_file.c_str());
+    string lineTitle;
+
+    if (!infile) {
+        cout << "打开测试文件失败" << endl;
+        exit(0);
+    }
+
+    vector<Data> test_data_set;
+    while (infile) {
+        vector<double> feature;
+        string line;
+        getline(infile, line);
+        if (line.size() > 0) {
+            stringstream sin(line);
+            double dataV;
+            int i = 0;
+            char ch;
+            while (sin) {
+                char c = sin.peek();
+                if (int(c) != -1) {
+                    sin >> dataV;
+                    feature.push_back(dataV);
+                    sin >> ch;
+                    i++;
+                } else {
+                    cout << "测试文件数据格式不正确" << endl;
+                    exit(-1);
+                }
+            }
+            test_data_set.push_back(Data(feature, 0));
+        }
+    }
+
+    infile.close();
+    return test_data_set;
+}
+
+int StorePredict(const vector<int> & predict, string predict_out_file)
 {
     string line;
-    int i;
+    int i = 0;
 
-    ofstream fout(predictOutFile.c_str());
+    ofstream fout(predict_out_file.c_str());
     if (!fout.is_open()) {
-        cout << "打开预测结果文件失败" << endl;
+        printf("打开预测结果文件失败");
+        exit(1);
     }
     for (i = 0; i < predict.size(); i++) {
         fout << predict[i] << endl;
@@ -376,42 +323,17 @@ int LR::storePredict(vector<int> &predict)
     return 0;
 }
 
-int main(int argc, char *argv[])
-{
+
+void Test (string answerFile, string predictFile) {
     vector<int> answerVec;
     vector<int> predictVec;
     int correctCount;
     double accurate;
 
-#ifdef OFFLINE // 线下测试用的数据路径
-    string trainFile = "./data/train_data.txt";
-    string testFile = "./data/test_data.txt";
-    string predictFile = "./data/result.txt";
-    string answerFile = "./data/answer.txt";
-#else // 提交到线上，官方要求的数据路径
-    string trainFile = "/data/train_data.txt";
-    string testFile = "/data/test_data.txt";
-    string predictFile = "/projects/student/result.txt";
-    string answerFile = "/projects/student/answer.txt";
-#endif
-
-    LR logist(trainFile, testFile, predictFile);
-
-    cout << "ready to train model" << endl;
-    logist.train();
-
-    cout << "training ends, ready to store the model" << endl;
-    logist.storeModel();
-
-    cout << "let's have a prediction test" << endl;
-    logist.predict();
-
-#ifdef TEST
-    
     cout << "ready to load answer data" << endl;
     loadAnswerData(answerFile, answerVec);
-
     loadAnswerData(predictFile, predictVec);
+
     cout << "test data set size is " << predictVec.size() << endl;
     correctCount = 0;
     for (int j = 0; j < predictVec.size(); j++) {
@@ -426,6 +348,46 @@ int main(int argc, char *argv[])
 
     accurate = ((double)correctCount) / answerVec.size();
     cout << "the prediction accuracy is " << accurate << endl;
+}
+
+int main(int argc, char *argv[])
+{
+
+
+#ifdef OFFLINE // 线下测试用的数据路径
+    string trainFile = "./data/train_data.txt";
+    string testFile = "./data/test_data.txt";
+    string predictFile = "./data/result.txt";
+    string answerFile = "./data/answer.txt";
+#else // 提交到线上，官方要求的数据路径
+    string trainFile = "/data/train_data.txt";
+    string testFile = "/data/test_data.txt";
+    string predictFile = "/projects/student/result.txt";
+    string answerFile = "/projects/student/answer.txt";
+#endif
+
+    vector<Data> train_data_set = LoadTrainData(trainFile);
+    vector<Data> test_data_set = LoadTestData(testFile);
+
+    //////////////////////////////
+    ///  LR Begin
+    //////////////////////////////
+    LR logist(train_data_set);
+
+    cout << "ready to train model" << endl;
+    logist.train();
+
+    cout << "let's have a prediction test" << endl;
+    logist.predict(test_data_set);
+
+    //////////////////////////////
+    /// SVR Begin
+    //////////////////////////////
+
+    StorePredict(logist.GetPredictVec(), predictFile);
+
+#ifdef TEST
+    Test(answerFile, predictFile);
 #endif
 
     return 0;
