@@ -355,10 +355,10 @@ int main(int argc, char *argv[])
 
 
 #ifdef OFFLINE // 线下测试用的数据路径
-    string trainFile = "./data/train_data.txt";
-    string testFile = "./data/test_data.txt";
-    string predictFile = "./data/result.txt";
-    string answerFile = "./data/answer.txt";
+    string trainFile = "../data/train_data.txt";
+    string testFile = "../data/test_data.txt";
+    string predictFile = "../data/result.txt";
+    string answerFile = "../data/answer.txt";
 #else // 提交到线上，官方要求的数据路径
     string trainFile = "/data/train_data.txt";
     string testFile = "/data/test_data.txt";
