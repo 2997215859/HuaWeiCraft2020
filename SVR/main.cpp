@@ -6,199 +6,641 @@
 #include <cstdlib>
 #include <climits>
 #include <zconf.h>
+#include <cfloat>
+
+
+#define TAU 1e-12
 
 using namespace std;
 
-///////////////////////////////
-///    LR Begin
-///////////////////////////////
-
 struct Data {
     vector<double> features;
-    int label;
-    Data(vector<double> f, int l) : features(f), label(l)
+    double label;
+    Data(vector<double> f, double l) : features(f), label(l)
     {}
 };
-struct Param {
-    vector<double> wtSet;
+
+/**
+ * svm 参数
+ */
+struct SvmParam
+{
+    double eps;
+    double C;
+    double nu;
 };
 
+enum { STATUS_LOWER_BOUND, STATUS_UPPER_BOUND, STATUS_FREE };
+enum ServerType {TYPE_GENERAL, TYPE_LARGE, TYPE_HIGH};
 
-class LR {
+
+
+class SVR {
 public:
+//    std::vector<std::vector<double>> X;
+//    std::vector<double> Y;
+
+    const vector<Data> & train_data_set_;
+
+    SvmParam param;
+
+    SVR(const vector<Data> & train_data_set, SvmParam param);
+
+    int model_l;
+    std::vector<std::vector<double>> sv;
+    std::vector<double> sv_coef;
+    double rho;
+    std::vector<int> sv_indices;
+
+    double obj;
+    double r;
+
+    int lives_size;
+    std::vector<char> y;
+    std::vector<double> g;
+    std::vector<char> status;
+    std::vector<double> a;
+    double eps;
+    std::vector<double> p;
+    std::vector<int> lives;
+    std::vector<double> g_bar;
+    bool not_constricted;
+    std::vector<char> sign;
+    std::vector<int> index;
+    mutable int next_buffer;
+    std::vector<std::vector<float>> buffer;
+    std::vector<double> qd;
+
+public:
+    void update_a_status(int i);
+
+    void calc_gradient(int l);
+    int calc_ws(int &i, int &j);
+    double calc_rho();
+    std::vector<double> calc_a();
+    std::vector<float> calc_q(int i, int len);
+
+    void constriction(int l);
+    bool constricted(int i, double g_max1, double g_max2, double g_max3, double g_max4);
+
     void train();
-    void predict(const vector<Data> & test_data_set);
-    int loadModel();
-    int storeModel();
-    vector<int>  GetPredictVec();
-    LR(const vector<Data> & train_data_set);
+    vector<int> predict(const std::vector<Data> & x);
 
+    inline bool is_upper_bound(int i) { return status[i] == STATUS_UPPER_BOUND; }
+    inline bool is_lower_bound(int i) { return status[i] == STATUS_LOWER_BOUND; }
+    inline bool is_free(int i) { return status[i] == STATUS_FREE; }
+    inline std::vector<double> calc_qd() const {return qd;}
+    inline double kernel_linear(int i, int j) {return dot(train_data_set_[i].features, train_data_set_[j].features);}
+    static double dot(const std::vector<double> & px, const std::vector<double> & py);
 private:
-    vector<Data> trainDataSet;
-    vector<Data> testDataSet;
-    vector<int> predictVec;
-    Param param;
-    string trainFile;
-    string testFile;
-    string predictOutFile;
-    string weightParamFile = "modelweight.txt";
-
-private:
-    bool loadTrainData();
-    bool loadTestData();
-    int storePredict(vector<int> &predict);
-    void initParam();
-    double wxbCalc(const Data &data);
-    double sigmoidCalc(const double wxb);
-    double lossCal();
-    double gradientSlope(const vector<Data> &dataSet, int index, const vector<double> &sigmoidVec);
-
-private:
-    int featuresNum;
-    const double wtInitV = 1.0;
-    const double stepSize = 0.1;
-    const int maxIterTimes = 300;
     const double predictTrueThresh = 0.5;
-    const int train_show_step = 10;
 };
 
-LR::LR(const vector<Data> & train_data_set): trainDataSet(train_data_set) {
-    featuresNum = trainDataSet[0].features.size();
-    initParam();
+SVR::SVR(const vector<Data> & train_data_set, SvmParam param): train_data_set_(train_data_set), param(param) {
+
+
+    // 生成前半段
+    for (int i = 0;i < train_data_set_.size(); i++) {
+        sign.push_back(1);
+        index.push_back(i);
+        qd.push_back(kernel_linear(i, i));
+    }
+
+    // 生成后半段
+    for (int i = 0;i < train_data_set_.size(); i++) {
+        sign.push_back(-1);
+        index.push_back(i);
+        qd.push_back(qd[i]);
+    }
+
+    buffer.push_back(std::vector<float>(2 * train_data_set_.size()));
+    buffer.push_back(std::vector<float>(2 * train_data_set_.size()));
+
+    next_buffer = 0;
 }
 
-inline vector<int> LR::GetPredictVec() {
-    return predictVec;
-}
+void SVR::train() {
 
+    // 计算a和ro
+    std::vector<double> a = calc_a();
 
-void LR::initParam()
-{
-    param.wtSet.clear();
-    for (int i = 0; i < featuresNum; i++) {
-        param.wtSet.push_back(wtInitV);
+    model_l = 0;
+    for(int i = 0; i < train_data_set_.size();i++) {
+        if (fabs(a[i]) > 0) {
+            sv.push_back(train_data_set_[i].features);
+            sv_coef.push_back(a[i]);
+            sv_indices.push_back(i + 1);
+            model_l++;
+        }
     }
 }
 
+std::vector<double> SVR::calc_a() {
+    std::vector<double> res_a(train_data_set_.size(), 0.0);
 
-double LR::wxbCalc(const Data & data)
-{
-    double mulSum = 0.0L;
-    int i;
-    double wtv, feav;
-    for (i = 0; i < param.wtSet.size(); i++) {
-        wtv = param.wtSet[i];
-        feav = data.features[i];
-        mulSum += wtv * feav;
+    // nu_svr 求解
+    std::vector<double> t_a;
+
+    // 处理前半段的数据
+    double sum = param.C * param.nu * train_data_set_.size() / 2;
+    for(int i=0;i<train_data_set_.size();i++) {
+        t_a.push_back(std::min(param.C, sum));
+        this->p.push_back(-train_data_set_[i].label);
+        this->y.push_back(1);
+
+        sum -= t_a[i];
     }
 
-    return mulSum;
-}
-
-inline double LR::sigmoidCalc(const double wxb)
-{
-    double expv = exp(-1 * wxb);
-    double expvInv = 1 / (1 + expv);
-    return expvInv;
-}
-
-
-double LR::lossCal()
-{
-    double lossV = 0.0L;
-    int i;
-
-    for (i = 0; i < trainDataSet.size(); i++) {
-        lossV -= trainDataSet[i].label * log(sigmoidCalc(wxbCalc(trainDataSet[i])));
-        lossV -= (1 - trainDataSet[i].label) * log(1 - sigmoidCalc(wxbCalc(trainDataSet[i])));
-    }
-    lossV /= trainDataSet.size();
-    return lossV;
-}
-
-
-double LR::gradientSlope(const vector<Data> &dataSet, int index, const vector<double> &sigmoidVec)
-{
-    double gsV = 0.0L;
-    int i;
-    double sigv, label;
-    for (i = 0; i < dataSet.size(); i++) {
-        sigv = sigmoidVec[i];
-        label = dataSet[i].label;
-        gsV += (label - sigv) * (dataSet[i].features[index]);
+    // 处理后半段的数据
+    for(int i=0;i<train_data_set_.size();i++) {
+        t_a.push_back(t_a[i]);
+        this->p.push_back(train_data_set_[i].label);
+        this->y.push_back(-1);
     }
 
-    gsV = gsV / dataSet.size();
-    return gsV;
-}
 
-void LR::train() {
+    // 求解得到t_a, 进一步得到a
 
-    double sigmoidVal;
-    double wxbVal;
-    int i, j;
+    this->a = t_a;
+//    this->Cp = param.C;
+//    this->Cn = param.C;
+    this->eps = param.eps;
 
-    for (i = 0; i < maxIterTimes; i++) {
-        vector<double> sigmoidVec;
+    not_constricted = false;
 
-        for (j = 0; j < trainDataSet.size(); j++) {
-            wxbVal = wxbCalc(trainDataSet[j]);
-            sigmoidVal = sigmoidCalc(wxbVal);
-            sigmoidVec.push_back(sigmoidVal);
+    int tmp_l =  2 * train_data_set_.size();
+
+    status = std::vector<char>(tmp_l);
+    for(int i=0;i<tmp_l;i++) update_a_status(i);
+
+    for(int i=0;i<tmp_l;i++) lives.push_back(i);
+
+    lives_size = tmp_l;
+
+    for(double &t: p) {
+        g.push_back(t);
+        g_bar.push_back(0);
+    }
+
+    for(int i=0;i<tmp_l;i++)
+        if (a[i] >= 0) {
+            const std::vector<float> Q_i = calc_q(i, tmp_l);
+            for(int j=0;j<tmp_l;j++)
+                g[j] += a[i]*Q_i[j];
+
+            if(a[i] >= param.C)
+                for(int j=0;j<tmp_l;j++)
+                    g_bar[j] += param.C * Q_i[j];
         }
 
-        for (j = 0; j < param.wtSet.size(); j++) {
-            param.wtSet[j] += stepSize * gradientSlope(trainDataSet, j, sigmoidVec);
+
+    // 优化
+
+    int iter = 0;
+    int max_iter = std::max(10000000, tmp_l>INT_MAX/100? INT_MAX: 100*tmp_l);
+    int counter = std::min(tmp_l,1000)+1;
+
+    while (iter < max_iter) {
+        // 松弛
+        if (--counter == 0) {
+            counter = std::min(tmp_l,1000);
+            constriction(tmp_l);
         }
 
-        if (i % train_show_step == 0) {
-            cout << "iter " << i << ". updated weight value is : ";
-            for (j = 0; j < param.wtSet.size(); j++) {
-                cout << param.wtSet[j] << "  ";
+        int i,j;
+        if(calc_ws(i,j) != 0) {
+
+            calc_gradient(tmp_l);
+            lives_size = tmp_l;
+
+            if(calc_ws(i,j)!=0) break;
+            else counter = 1;
+        }
+
+        iter++;
+
+        // update a[i] and a[j], handle bounds carefully
+
+        // 更新a[i] 和 a[j]
+        std::vector<float> Q_i = calc_q(i,lives_size);
+        std::vector<float> Q_j = calc_q(j,lives_size);
+
+        double C_i = param.C;
+        double C_j = param.C;
+
+        double old_a_i = a[i];
+        double old_a_j = a[j];
+
+        if(y[i]!=y[j]) {
+            double quad_coef = calc_qd()[i]+calc_qd()[j]+2*Q_i[j];
+            if (quad_coef <= 0) quad_coef = TAU;
+            double delta = (-g[i]-g[j]) / quad_coef;
+            double diff = a[i] - a[j];
+            a[i] += delta;
+            a[j] += delta;
+
+            if(diff > 0) {
+                if(a[j] < 0) {
+                    a[j] = 0;
+                    a[i] = diff;
+                }
+            } else {
+                if(a[i] < 0) {
+                    a[i] = 0;
+                    a[j] = -diff;
+                }
             }
-            cout << endl;
+
+            if(diff > C_i - C_j) {
+                if(a[i] > C_i) {
+                    a[i] = C_i;
+                    a[j] = C_i - diff;
+                }
+            } else {
+                if(a[j] > C_j) {
+                    a[j] = C_j;
+                    a[i] = C_j + diff;
+                }
+            }
+        }
+        else {
+            double quad_coef = calc_qd()[i]+calc_qd()[j]-2*Q_i[j];
+            if (quad_coef <= 0)
+                quad_coef = TAU;
+            double delta = (g[i]-g[j])/quad_coef;
+            double sum = a[i] + a[j];
+            a[i] -= delta;
+            a[j] += delta;
+
+            if(sum > C_i) {
+                if(a[i] > C_i) {
+                    a[i] = C_i;
+                    a[j] = sum - C_i;
+                }
+            } else {
+                if(a[j] < 0){
+                    a[j] = 0;
+                    a[i] = sum;
+                }
+            }
+
+            if(sum > C_j) {
+                if(a[j] > C_j) {
+                    a[j] = C_j;
+                    a[i] = sum - C_j;
+                }
+            } else {
+                if(a[i] < 0) {
+                    a[i] = 0;
+                    a[j] = sum;
+                }
+            }
+        }
+
+        // 更新 g
+
+        double delta_a_i = a[i] - old_a_i;
+        double delta_a_j = a[j] - old_a_j;
+
+        for(int k=0;k<lives_size;k++) {
+            g[k] += Q_i[k]*delta_a_i + Q_j[k]*delta_a_j;
+        }
+
+        // 更新a的状态和G_bar
+
+
+        bool ui = is_upper_bound(i);
+        bool uj = is_upper_bound(j);
+        update_a_status(i);
+        update_a_status(j);
+        int k;
+        if(ui != is_upper_bound(i))
+        {
+            Q_i = calc_q(i,tmp_l);
+            if(ui)
+                for(k=0;k<tmp_l;k++)
+                    g_bar[k] -= C_i * Q_i[k];
+            else
+                for(k=0;k<tmp_l;k++)
+                    g_bar[k] += C_i * Q_i[k];
+        }
+
+        if(uj != is_upper_bound(j))
+        {
+            Q_j = calc_q(j,tmp_l);
+            if(uj)
+                for(k=0;k<tmp_l;k++)
+                    g_bar[k] -= C_j * Q_j[k];
+            else
+                for(k=0;k<tmp_l;k++)
+                    g_bar[k] += C_j * Q_j[k];
+        }
+
+    }
+
+    if(iter >= max_iter)
+    {
+        if(lives_size < tmp_l)
+        {
+            // reconstruct the whole calc_gradient to calculate objective value
+            calc_gradient(tmp_l);
+            lives_size = tmp_l;
         }
     }
+
+    // 计算 rho
+
+    rho = calc_rho();
+
+    // 计算obj
+    double v = 0;
+    for(int i=0;i<tmp_l;i++) v += a[i] * (g[i] + p[i]);
+    obj = v/2;
+
+    // 求解结束
+
+    for(int i=0;i<tmp_l;i++)
+        t_a[lives[i]] = a[i];
+
+    for(int i=0;i<train_data_set_.size();i++)
+        res_a[i] = t_a[i] - t_a[i+train_data_set_.size()];
+
+    return res_a;
 }
 
-void LR::predict(const vector<Data> & test_train_data)
-{
+vector<int> SVR::predict(const std::vector<Data> & test_data_set) {
 
-    testDataSet = test_train_data;
+    vector<int> predict_res;
+    for (const Data &d: test_data_set) {
+        double pred_label = -rho;
+        for(int i=0;i<model_l;i++) {
+            pred_label += sv_coef[i] * dot(d.features, sv[i]);
+        }
 
-    double sigVal;
-    int predictVal;
-
-    for (int j = 0; j < test_train_data.size(); j++) {
-        sigVal = sigmoidCalc(wxbCalc(test_train_data[j]));
-        predictVal = sigVal >= predictTrueThresh ? 1 : 0;
-        predictVec.push_back(predictVal);
+        int predict_val = pred_label >= predictTrueThresh ? 1 : 0;
+        predict_res.push_back(predict_val);
     }
 
+    return predict_res;
 }
 
-int LR::storeModel()
-{
-    string line;
-    int i;
+void SVR::calc_gradient(int l) {
+    if(lives_size == l) return;
 
-    ofstream fout(weightParamFile.c_str());
-    if (!fout.is_open()) {
-        cout << "打开模型参数文件失败" << endl;
+    int nr_free = 0;
+
+    for(int j=lives_size;j<l;j++) g[j] = g_bar[j] + p[j];
+
+    for(int j=0;j<lives_size;j++) if(is_free(j)) nr_free++;
+
+    if (nr_free*l > 2*lives_size*(l-lives_size)) {
+        for(int i=lives_size;i<l;i++) {
+            const std::vector<float> Q_i = calc_q(i,lives_size);
+            for(int j=0;j<lives_size;j++) if(is_free(j))g[i] += a[j] * Q_i[j];
+        }
+    } else {
+        for(int i=0;i<lives_size;i++)
+            if(is_free(i)) {
+                const std::vector<float> Q_i = calc_q(i,l);
+                double a_i = a[i];
+                for(int j=lives_size;j<l;j++)
+                    g[j] += a_i * Q_i[j];
+            }
     }
-    if (param.wtSet.size() < featuresNum) {
-        cout << "wtSet size is " << param.wtSet.size() << endl;
+}
+
+// return 1 if already optimal, return 0 otherwise
+
+/**
+ *
+ * @param out_i
+ * @param out_j
+ * @return 返回1表示已经最优, 返回0表示其他
+ */
+int SVR::calc_ws(int &res_i, int &res_j) {
+
+    double g_map_p = -DBL_MAX;
+    double g_map_p2 = -DBL_MAX;
+    int g_map_p_index = -1;
+
+    double g_max_n = -DBL_MAX;
+    double g_max_n2 = -DBL_MAX;
+    int g_max_n_index = -1;
+
+    int g_min_index = -1;
+    double obj_diff_min = DBL_MAX;
+
+    for(int t=0;t<lives_size;t++)
+        if(y[t] == 1) {
+            if(!is_upper_bound(t))
+                if(-g[t] >= g_map_p) {
+                    g_map_p = -g[t];
+                    g_map_p_index = t;
+                }
+
+        } else {
+            if(!is_lower_bound(t))
+                if(g[t] >= g_max_n)
+                {
+                    g_max_n = g[t];
+                    g_max_n_index = t;
+                }
+        }
+
+    std::vector<float> Q_ip;
+    std::vector<float> Q_in;
+
+    // 空Q_ip无法被访问: 如果ip = -1, 则g_max_p = -INF;
+    if(g_map_p_index != -1) Q_ip = calc_q(g_map_p_index,lives_size);
+    if(g_max_n_index != -1) Q_in = calc_q(g_max_n_index,lives_size);
+
+    for (int j=0;j<lives_size;j++) {
+        if(y[j]==+1) {
+            if (!is_lower_bound(j)) {
+                double grad_diff=g_map_p+g[j];
+                if (g[j] >= g_map_p2)
+                    g_map_p2 = g[j];
+                if (grad_diff > 0)
+                {
+                    double obj_diff;
+                    double quad_coef = calc_qd()[g_map_p_index]+calc_qd()[j]-2*Q_ip[j];
+                    if (quad_coef > 0)
+                        obj_diff = -(grad_diff*grad_diff)/quad_coef;
+                    else
+                        obj_diff = -(grad_diff*grad_diff)/TAU;
+
+                    if (obj_diff <= obj_diff_min)
+                    {
+                        g_min_index=j;
+                        obj_diff_min = obj_diff;
+                    }
+                }
+            }
+        } else {
+            if (!is_upper_bound(j)) {
+                double grad_diff=g_max_n-g[j];
+                if (-g[j] >= g_max_n2) g_max_n2 = -g[j];
+                if (grad_diff > 0) {
+                    double obj_diff;
+                    double quad_coef = calc_qd()[g_max_n_index]+calc_qd()[j]-2*Q_in[j];
+                    if (quad_coef > 0) obj_diff = -(grad_diff*grad_diff)/quad_coef;
+                    else obj_diff = -(grad_diff*grad_diff)/TAU;
+
+                    if (obj_diff <= obj_diff_min) {
+                        g_min_index=j;
+                        obj_diff_min = obj_diff;
+                    }
+                }
+            }
+        }
     }
-    for (i = 0; i < featuresNum; i++) {
-        fout << param.wtSet[i] << " ";
-    }
-    fout.close();
+
+    if(std::max(g_map_p+g_map_p2,g_max_n+g_max_n2) < eps || g_min_index == -1) return 1;
+
+    if (y[g_min_index] == +1) res_i = g_map_p_index;
+    else res_i = g_max_n_index;
+
+    res_j = g_min_index;
+
     return 0;
 }
 
-///////////////////////////////
-///    LR end
-///////////////////////////////
+double SVR::calc_rho() {
+    int nr_free1 = 0,nr_free2 = 0;
+    double ub1 = DBL_MAX, ub2 = DBL_MAX;
+    double lb1 = -DBL_MAX, lb2 = -DBL_MAX;
+    double sum_free1 = 0, sum_free2 = 0;
+
+    for(int i=0; i<lives_size; i++) {
+        if(y[i] == 1) {
+            if(is_upper_bound(i)) lb1 = std::max(lb1,g[i]);
+            else if(is_lower_bound(i)) ub1 = std::min(ub1,g[i]);
+            else {
+                nr_free1++;
+                sum_free1 += g[i];
+            }
+        } else {
+            if(is_upper_bound(i)) lb2 = std::max(lb2,g[i]);
+            else if(is_lower_bound(i)) ub2 = std::min(ub2,g[i]);
+            else {
+                nr_free2++;
+                sum_free2 += g[i];
+            }
+        }
+    }
+
+    double r1,r2;
+    if(nr_free1 > 0) r1 = sum_free1/nr_free1;
+    else r1 = (ub1+lb1)/2;
+
+    if(nr_free2 > 0) r2 = sum_free2/nr_free2;
+    else r2 = (ub2+lb2)/2;
+
+    r = (r1+r2)/2;
+    return (r1-r2)/2;
+}
+
+bool SVR::constricted(int i, double g_max1, double g_max2, double g_max3, double g_max4)
+{
+    if (is_upper_bound(i)) {
+        if(y[i]==+1) return(-g[i] > g_max1);
+        else return(-g[i] > g_max4);
+    } else if(is_lower_bound(i)) {
+        if(y[i]==+1) return(g[i] > g_max2);
+        else return(g[i] > g_max3);
+    } else return(false);
+}
+
+void SVR::constriction(int l)
+{
+    double g_max1 = -DBL_MAX;	// max { -y_i * grad(f)_i | y_i = +1, i in I_up(\a) }
+    double g_max2 = -DBL_MAX;	// max { y_i * grad(f)_i | y_i = +1, i in I_low(\a) }
+    double g_max3 = -DBL_MAX;	// max { -y_i * grad(f)_i | y_i = -1, i in I_up(\a) }
+    double g_max4 = -DBL_MAX;	// max { y_i * grad(f)_i | y_i = -1, i in I_low(\a) }
+
+
+    // 找出最先的错误的一对
+    for(int i=0;i<lives_size;i++) {
+
+        if (!is_upper_bound(i)) {
+            if(y[i] == 1) {
+                if(-g[i] > g_max1) g_max2 = -g[i];
+            } else if(-g[i] > g_max4) g_max4 = -g[i];
+        }
+
+        if(!is_lower_bound(i)) {
+            if(y[i] == 1) {
+                if(g[i] > g_max2) g_max2 = g[i];
+            }
+            else if(g[i] > g_max3) g_max3= g[i];
+        }
+    }
+
+    if(not_constricted == false && std::max(g_max1 + g_max2, g_max3 + g_max4) <= eps*10) {
+        not_constricted = true;
+        calc_gradient(l);
+        lives_size = l;
+    }
+
+    for(int i=0;i<lives_size;i++)
+        if (constricted(i, g_max1, g_max2, g_max3, g_max4)) {
+            lives_size--;
+            while (lives_size > i) {
+                if (!constricted(lives_size, g_max1, g_max2, g_max3, g_max4)) {
+
+                    std::swap(sign[i],sign[lives_size]);
+                    std::swap(index[i],index[lives_size]);
+                    std::swap(qd[i],qd[lives_size]);
+                    std::swap(y[i],y[lives_size]);
+                    std::swap(g[i],g[lives_size]);
+                    std::swap(status[i],status[lives_size]);
+                    std::swap(a[i],a[lives_size]);
+                    std::swap(p[i],p[lives_size]);
+                    std::swap(lives[i],lives[lives_size]);
+                    std::swap(g_bar[i],g_bar[lives_size]);
+                    break;
+                }
+                lives_size--;
+            }
+        }
+}
+
+void SVR::update_a_status(int i) {
+    if(a[i] >= param.C)
+        status[i] = STATUS_UPPER_BOUND;
+    else if(a[i] <= 0)
+        status[i] = STATUS_LOWER_BOUND;
+    else status[i] = STATUS_FREE;
+}
+
+
+std::vector<float> SVR::calc_q(int i, int len) {
+
+    std::vector<float> data;
+    int real_i = index[i];
+
+    for(int j=0;j<train_data_set_.size();j++) data.push_back((float)kernel_linear(real_i,j));
+
+    std::vector<float> buf = buffer[next_buffer];
+
+    next_buffer = 1 - next_buffer;
+    char si = sign[i];
+    for(int j=0;j<len;j++) buf[j] = (float) si * (float) sign[j] * data[index[j]];
+
+    return buf;
+}
+
+
+double SVR::dot(const std::vector<double> & px, const std::vector<double> & py)
+{
+    double sum = 0;
+    int i = 0;
+    while(i < px.size()) {
+        sum += px[i] * py[i];
+        i++;
+    }
+    return sum;
+}
 
 bool loadAnswerData(string awFile, vector<int> & awVec)
 {
@@ -223,7 +665,7 @@ bool loadAnswerData(string awFile, vector<int> & awVec)
     return true;
 }
 
-vector<Data> LoadTrainData(string train_file)
+vector<Data> LoadTrainData(string train_file, int read_num)
 {
 
     ifstream infile(train_file.c_str());
@@ -234,14 +676,16 @@ vector<Data> LoadTrainData(string train_file)
         exit(0);
     }
 
+    int cnt = 0;
     vector<Data> train_data_set;
-    while (infile) {
+    while (infile && cnt < read_num) {
         getline(infile, line);
         if (line.size() > 0) {
+            cnt++;
             stringstream sin(line);
             char ch;
             double dataV;
-            int i = 0;
+
             vector<double> feature;
 
             while (sin) {
@@ -250,7 +694,7 @@ vector<Data> LoadTrainData(string train_file)
                     sin >> dataV;
                     feature.push_back(dataV);
                     sin >> ch;
-                    i++;
+
                 } else {
                     printf("训练文件数据格式不正确，出错行为[%d]行", train_data_set.size() + 1);
                     exit(1);
@@ -366,25 +810,29 @@ int main(int argc, char *argv[])
     string answerFile = "/projects/student/answer.txt";
 #endif
 
-    vector<Data> train_data_set = LoadTrainData(trainFile);
+    /* 1. 读取训练集 */
+    int read_num = 100;
+    vector<Data> train_data_set = LoadTrainData(trainFile, read_num);
+//    train_data_set = vector<Data>(train_data_set.begin(), train_data_set.begin() + min(100.0, train_data_set.size() + 0.0));
     vector<Data> test_data_set = LoadTestData(testFile);
 
-    //////////////////////////////
-    ///  LR Begin
-    //////////////////////////////
-    LR logist(train_data_set);
+    /* 2. 初始化问题*/
+    SvmParam param;
 
+    param.nu = 0.5;
+    param.C = 0.13;
+    param.eps = 1e-3;
+
+
+    /* 3. 训练模型 */
+    SVR svr(train_data_set, param);
     cout << "ready to train model" << endl;
-    logist.train();
+    svr.train();
 
     cout << "let's have a prediction test" << endl;
-    logist.predict(test_data_set);
+    vector<int> predict_res = svr.predict(test_data_set);
 
-    //////////////////////////////
-    /// SVR Begin
-    //////////////////////////////
-
-    StorePredict(logist.GetPredictVec(), predictFile);
+    StorePredict(predict_res, predictFile);
 
 #ifdef TEST
     Test(answerFile, predictFile);
