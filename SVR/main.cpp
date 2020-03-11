@@ -815,17 +815,17 @@ int main(int argc, char *argv[])
     /* 1. 读取训练集 */
     auto t1 = chrono::steady_clock::now();
 
-    int read_num = 20;
+    int read_num = 100;
     vector<Data> train_data_set = LoadTrainData(trainFile, read_num);
 
     auto t2 = chrono::steady_clock::now();
 
-    printf("训练集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(t2 - t1).count());
+    printf("训练集读取时间（s）: %f \n", chrono::duration<double, std::milli>(t2 - t1).count() / 1000);
 
 //    train_data_set = vector<Data>(train_data_set.begin(), train_data_set.begin() + min(100.0, train_data_set.size() + 0.0));
     vector<Data> test_data_set = LoadTestData(testFile);
     auto t3 = chrono::steady_clock::now();
-    printf("测试集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(t3 - t2).count());
+    printf("测试集读取时间（s）: %f \n", chrono::duration<double, std::milli>(t3 - t2).count() / 1000);
 
     /* 2. 初始化问题*/
     SvmParam param;
@@ -840,12 +840,12 @@ int main(int argc, char *argv[])
     SVR svr(train_data_set, param);
     svr.train();
     auto t5 = chrono::steady_clock::now();
-    printf("模型初始化及训练时间（ms）: %f \n", chrono::duration<double, std::milli>(t5 - t4).count());
+    printf("模型初始化及训练时间（s）: %f \n", chrono::duration<double, std::milli>(t5 - t4).count() / 1000);
 
     /* 4. 模型预测*/
     vector<int> predict_res = svr.predict(test_data_set);
     auto t6 = chrono::steady_clock::now();
-    printf("模型预测（ms）: %f \n", chrono::duration<double, std::milli>(t6 - t5).count());
+    printf("模型预测（s）: %f \n", chrono::duration<double, std::milli>(t6 - t5).count() / 1000);
 
     StorePredict(predict_res, predictFile);
 
