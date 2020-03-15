@@ -6,13 +6,11 @@
 #include <cstdlib>
 #include <climits>
 #include <chrono>
+#include <cfloat>
 
 
 using namespace std;
 
-///////////////////////////////
-///    LR Begin
-///////////////////////////////
 
 struct Data {
     vector<double> features;
@@ -20,186 +18,284 @@ struct Data {
     Data(vector<double> f, int l) : features(f), label(l)
     {}
 };
-struct Param {
-    vector<double> wtSet;
-};
 
+
+
+
+vector<Data> LoadData(const string & filename, bool last_label_exist ,int read_line_num)
+{
+
+    ifstream infile(filename.c_str());
+    string line;
+
+    if (!infile) {
+        cout << "打开训练文件失败" << endl;
+        exit(0);
+    }
+
+    vector<Data> data_set;
+    int cnt = 0;
+    while (infile) {
+        getline(infile, line);
+        if (line.size() > 0) {
+
+            if (last_label_exist && cnt >= read_line_num) break;
+
+            cnt++;
+
+            stringstream sin(line);
+            char ch;
+            double dataV;
+            int i = 0;
+            vector<double> feature;
+
+            while (sin) {
+                char c = sin.peek();
+                if (int(c) != -1) {
+                    sin >> dataV;
+                    feature.push_back(dataV);
+                    sin >> ch;
+                    i++;
+                } else {
+                    printf("训练文件数据格式不正确，出错行为[%d]行", data_set.size() + 1);
+                    exit(1);
+                }
+            }
+
+            if (last_label_exist) {
+                int ftf = (int) feature.back();
+                feature.pop_back();
+                data_set.push_back(Data(feature, ftf));
+            } else {
+                data_set.push_back(Data(feature, 0));
+            }
+
+        }
+    }
+    infile.close();
+    return data_set;
+}
 
 class LR {
 public:
-    void train();
-    void predict(const vector<Data> & test_data_set);
-    int loadModel();
-    int storeModel();
-    vector<int>  GetPredictVec();
-    LR(const vector<Data> & train_data_set);
+    void train() {
+
+        LoadTrainData();
+
+#ifdef OFFLINE
+        auto start_time = chrono::steady_clock::now();
+#endif
+
+        double sigmoidVal;
+        double wxbVal;
+
+        for (int i = 0; i < maxIterTimes; i++) {
+            vector<double> sigmoidVec;
+
+            for (int j = 0; j < train_data_.size(); j++) {
+                wxbVal = wxbCalc(train_data_[j], weight_);
+                sigmoidVal = sigmoidCalc(wxbVal);
+                sigmoidVec.push_back(sigmoidVal);
+            }
+
+            double error_rate = 0.0;
+            for (int j = 0; j < train_data_.size(); j++) {
+                error_rate += pow(train_data_[j].label - sigmoidVec[j], 2);
+            }
+
+            if (error_rate < min_error_rate_) {
+                min_error_rate_ = error_rate;
+                min_error_weight_ = weight_;
+                min_error_iter_no_ = i;
+            }
+
+
+            double rate = rate_start * 1.0 / (1.0 + decay * i);
+            rate = max(rate, rate_min);
+
+            for (int j = 0; j < weight_.size(); j++) {
+                weight_[j] += rate * gradientSlope(train_data_, j, sigmoidVec);
+            }
+
+#ifdef OFFLINE
+            if (i % train_show_step == 0) {
+                cout << "iter: " << i << " error_rate: " << error_rate << " rate: " << rate;
+//                cout << ". updated weight value is : ";
+//                for (int j = 0; j < param.wtSet.size(); j++) {
+//                    cout << param.wtSet[j] << "  ";
+//                }
+                cout << endl;
+            }
+        }
+#endif
+
+#ifdef OFFLINE
+        auto end_time = chrono::steady_clock::now();
+        printf("模型训练时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+#endif
+
+    }
+    void predict() {
+
+        LoadTestData();
+
+#ifdef OFFLINE
+        auto start_time = chrono::steady_clock::now();
+#endif
+
+        double sigVal;
+        int predictVal;
+
+        for (int j = 0; j < test_data_.size(); j++) {
+            sigVal = sigmoidCalc(wxbCalc(test_data_[j], min_error_weight_));
+            predictVal = sigVal >= predictTrueThresh ? 1 : 0;
+            predict_vec.push_back(predictVal);
+        }
+
+#ifdef OFFLINE
+        auto end_time = chrono::steady_clock::now();
+        printf("模型预测时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+#endif
+
+        StorePredict();
+
+
+#ifdef OFFLINE
+        cout << "min_error_iter_no: " << min_error_iter_no_ << " min_error_rate: " << min_error_rate_ << endl;
+#endif
+
+    }
+
+
+    LR(const string & train_file, const string & test_file, const string & predict_file):
+        train_file_(train_file),
+        test_file_(test_file),
+        predict_file_(predict_file),
+        min_error_rate_(DBL_MAX),
+        min_error_iter_no_(-1) {
+        initParam();
+    }
 
 private:
-    vector<Data> trainDataSet;
-    vector<Data> testDataSet;
-    vector<int> predictVec;
-    Param param;
-    string trainFile;
-    string testFile;
-    string predictOutFile;
+    vector<Data> train_data_;
+    vector<Data> test_data_;
+    vector<int> predict_vec;
+
+    vector<double> weight_;
+    vector<double> min_error_weight_;
+    double min_error_rate_;
+    int min_error_iter_no_;
+
     string weightParamFile = "modelweight.txt";
 
 private:
-    bool loadTrainData();
-    bool loadTestData();
-    int storePredict(vector<int> &predict);
-    void initParam();
-    double wxbCalc(const Data &data);
-    double sigmoidCalc(const double wxb);
-    double lossCal();
-    double gradientSlope(const vector<Data> &dataSet, int index, const vector<double> &sigmoidVec);
+    void LoadTrainData() {
+#ifdef OFFLINE
+        auto start_time = chrono::steady_clock::now();
+#endif
+        train_data_ = LoadData(train_file_, true, read_line_num);
+#ifdef OFFLINE
+        auto end_time = chrono::steady_clock::now();
+        printf("训练集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+#endif
+    }
+    void LoadTestData() {
+#ifdef OFFLINE
+        auto start_time = chrono::steady_clock::now();
+#endif
+        test_data_ = LoadData(test_file_, false, -1);
+#ifdef OFFLINE
+        auto end_time = chrono::steady_clock::now();
+        printf("测试集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+#endif
+    }
+
+    void initParam()
+    {
+        weight_.clear();
+        for (int i = 0; i < features_num_; i++) {
+            weight_.push_back(wtInitV);
+        }
+    }
+
+    double wxbCalc(const Data &data, const vector<double> weight) {
+        double mulSum = 0.0L;
+        double wtv, feav;
+        for (int i = 0; i < weight.size(); i++) {
+            wtv = weight[i];
+            feav = data.features[i];
+            mulSum += wtv * feav;
+        }
+
+        return mulSum;
+    }
+    double sigmoidCalc(const double wxb) {
+        double expv = exp(-1 * wxb);
+        double expvInv = 1 / (1 + expv);
+        return expvInv;
+    }
+    double lossCal(const vector<double> & weight) {
+        double lossV = 0.0L;
+        int i;
+
+        for (i = 0; i < train_data_.size(); i++) {
+            lossV -= train_data_[i].label * log(sigmoidCalc(wxbCalc(train_data_[i], weight)));
+            lossV -= (1 - train_data_[i].label) * log(1 - sigmoidCalc(wxbCalc(train_data_[i], weight)));
+        }
+        lossV /= train_data_.size();
+        return lossV;
+    }
+    double gradientSlope(const vector<Data> &dataSet, int index, const vector<double> &sigmoidVec) {
+        double gsV = 0.0L;
+        int i;
+        double sigv, label;
+        for (i = 0; i < dataSet.size(); i++) {
+            sigv = sigmoidVec[i];
+            label = dataSet[i].label;
+            gsV += (label - sigv) * (dataSet[i].features[index]);
+        }
+
+        gsV = gsV / dataSet.size();
+        return gsV;
+    }
+
+    void StorePredict()
+    {
+        string line;
+        int i = 0;
+
+        ofstream fout(predict_file_.c_str());
+        if (!fout.is_open()) {
+            printf("打开预测结果文件失败");
+            exit(1);
+        }
+        for (i = 0; i < predict_vec.size(); i++) {
+            fout << predict_vec[i] << endl;
+        }
+        fout.close();
+    }
+
 
 private:
-    int featuresNum;
+    string train_file_;
+    string test_file_;
+    string predict_file_;
+    const int features_num_ = 1000;
+    const int read_line_num = 4000;
+private:
+
     const double wtInitV = 1.0;
-    const double stepSize = 0.1;
-    const int maxIterTimes = 300;
+
+    const double rate_start = 0.9;
+    const double decay = 0.05;
+    const double rate_min = 0.02;
+
+    const int maxIterTimes = 200;
     const double predictTrueThresh = 0.5;
-    const int train_show_step = 10;
+    const int train_show_step = 1;
 };
 
-LR::LR(const vector<Data> & train_data_set): trainDataSet(train_data_set) {
-    featuresNum = trainDataSet[0].features.size();
-    initParam();
-}
 
-inline vector<int> LR::GetPredictVec() {
-    return predictVec;
-}
-
-
-void LR::initParam()
-{
-    param.wtSet.clear();
-    for (int i = 0; i < featuresNum; i++) {
-        param.wtSet.push_back(wtInitV);
-    }
-}
-
-
-double LR::wxbCalc(const Data & data)
-{
-    double mulSum = 0.0L;
-    int i;
-    double wtv, feav;
-    for (i = 0; i < param.wtSet.size(); i++) {
-        wtv = param.wtSet[i];
-        feav = data.features[i];
-        mulSum += wtv * feav;
-    }
-
-    return mulSum;
-}
-
-inline double LR::sigmoidCalc(const double wxb)
-{
-    double expv = exp(-1 * wxb);
-    double expvInv = 1 / (1 + expv);
-    return expvInv;
-}
-
-
-double LR::lossCal()
-{
-    double lossV = 0.0L;
-    int i;
-
-    for (i = 0; i < trainDataSet.size(); i++) {
-        lossV -= trainDataSet[i].label * log(sigmoidCalc(wxbCalc(trainDataSet[i])));
-        lossV -= (1 - trainDataSet[i].label) * log(1 - sigmoidCalc(wxbCalc(trainDataSet[i])));
-    }
-    lossV /= trainDataSet.size();
-    return lossV;
-}
-
-
-double LR::gradientSlope(const vector<Data> &dataSet, int index, const vector<double> &sigmoidVec)
-{
-    double gsV = 0.0L;
-    int i;
-    double sigv, label;
-    for (i = 0; i < dataSet.size(); i++) {
-        sigv = sigmoidVec[i];
-        label = dataSet[i].label;
-        gsV += (label - sigv) * (dataSet[i].features[index]);
-    }
-
-    gsV = gsV / dataSet.size();
-    return gsV;
-}
-
-void LR::train() {
-
-    double sigmoidVal;
-    double wxbVal;
-    int i, j;
-
-    for (i = 0; i < maxIterTimes; i++) {
-        vector<double> sigmoidVec;
-
-        for (j = 0; j < trainDataSet.size(); j++) {
-            wxbVal = wxbCalc(trainDataSet[j]);
-            sigmoidVal = sigmoidCalc(wxbVal);
-            sigmoidVec.push_back(sigmoidVal);
-        }
-
-        for (j = 0; j < param.wtSet.size(); j++) {
-            param.wtSet[j] += stepSize * gradientSlope(trainDataSet, j, sigmoidVec);
-        }
-
-        if (i % train_show_step == 0) {
-            cout << "iter " << i << ". updated weight value is : ";
-            for (j = 0; j < param.wtSet.size(); j++) {
-                cout << param.wtSet[j] << "  ";
-            }
-            cout << endl;
-        }
-    }
-}
-
-void LR::predict(const vector<Data> & test_train_data)
-{
-
-    testDataSet = test_train_data;
-
-    double sigVal;
-    int predictVal;
-
-    for (int j = 0; j < test_train_data.size(); j++) {
-        sigVal = sigmoidCalc(wxbCalc(test_train_data[j]));
-        predictVal = sigVal >= predictTrueThresh ? 1 : 0;
-        predictVec.push_back(predictVal);
-    }
-
-}
-
-int LR::storeModel()
-{
-    string line;
-    int i;
-
-    ofstream fout(weightParamFile.c_str());
-    if (!fout.is_open()) {
-        cout << "打开模型参数文件失败" << endl;
-    }
-    if (param.wtSet.size() < featuresNum) {
-        cout << "wtSet size is " << param.wtSet.size() << endl;
-    }
-    for (i = 0; i < featuresNum; i++) {
-        fout << param.wtSet[i] << " ";
-    }
-    fout.close();
-    return 0;
-}
-
-///////////////////////////////
-///    LR end
-///////////////////////////////
 
 bool loadAnswerData(string awFile, vector<int> & awVec)
 {
@@ -224,105 +320,6 @@ bool loadAnswerData(string awFile, vector<int> & awVec)
     return true;
 }
 
-vector<Data> LoadTrainData(string train_file)
-{
-
-    ifstream infile(train_file.c_str());
-    string line;
-
-    if (!infile) {
-        cout << "打开训练文件失败" << endl;
-        exit(0);
-    }
-
-    vector<Data> train_data_set;
-    while (infile) {
-        getline(infile, line);
-        if (line.size() > 0) {
-            stringstream sin(line);
-            char ch;
-            double dataV;
-            int i = 0;
-            vector<double> feature;
-
-            while (sin) {
-                char c = sin.peek();
-                if (int(c) != -1) {
-                    sin >> dataV;
-                    feature.push_back(dataV);
-                    sin >> ch;
-                    i++;
-                } else {
-                    printf("训练文件数据格式不正确，出错行为[%d]行", train_data_set.size() + 1);
-                    exit(1);
-                }
-            }
-            int ftf = (int) feature.back();
-            feature.pop_back();
-            train_data_set.push_back(Data(feature, ftf));
-        }
-    }
-    infile.close();
-    return train_data_set;
-}
-
-
-vector<Data> LoadTestData(string test_file)
-{
-    ifstream infile(test_file.c_str());
-    string lineTitle;
-
-    if (!infile) {
-        cout << "打开测试文件失败" << endl;
-        exit(0);
-    }
-
-    vector<Data> test_data_set;
-    while (infile) {
-        vector<double> feature;
-        string line;
-        getline(infile, line);
-        if (line.size() > 0) {
-            stringstream sin(line);
-            double dataV;
-            int i = 0;
-            char ch;
-            while (sin) {
-                char c = sin.peek();
-                if (int(c) != -1) {
-                    sin >> dataV;
-                    feature.push_back(dataV);
-                    sin >> ch;
-                    i++;
-                } else {
-                    cout << "测试文件数据格式不正确" << endl;
-                    exit(-1);
-                }
-            }
-            test_data_set.push_back(Data(feature, 0));
-        }
-    }
-
-    infile.close();
-    return test_data_set;
-}
-
-int StorePredict(const vector<int> & predict, string predict_out_file)
-{
-    string line;
-    int i = 0;
-
-    ofstream fout(predict_out_file.c_str());
-    if (!fout.is_open()) {
-        printf("打开预测结果文件失败");
-        exit(1);
-    }
-    for (i = 0; i < predict.size(); i++) {
-        fout << predict[i] << endl;
-    }
-    fout.close();
-    return 0;
-}
 
 
 void Test (string answerFile, string predictFile) {
@@ -356,44 +353,30 @@ int main(int argc, char *argv[])
 
 
 #ifdef OFFLINE // 线下测试用的数据路径
-    string trainFile = "../data/train_data.txt";
-    string testFile = "../data/test_data.txt";
-    string predictFile = "../data/result.txt";
-    string answerFile = "../data/answer.txt";
+    string train_file = "../data/train_data.txt";
+    string test_file = "../data/test_data.txt";
+    string predict_file = "../data/result.txt";
+    string answer_file = "../data/answer.txt";
 #else // 提交到线上，官方要求的数据路径
-    string trainFile = "/data/train_data.txt";
-    string testFile = "/data/test_data.txt";
-    string predictFile = "/projects/student/result.txt";
-    string answerFile = "/projects/student/answer.txt";
+    string train_file = "/data/train_data.txt";
+    string test_file = "/data/test_data.txt";
+    string predict_file = "/projects/student/result.txt";
+    string answer_file = "/projects/student/answer.txt";
 #endif
 
-    auto t1 = chrono::steady_clock::now();
-    vector<Data> train_data_set = LoadTrainData(trainFile);
-    auto t2 = chrono::steady_clock::now();
-    printf("训练集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(t2 - t1).count());
+    LR logist(train_file, test_file, predict_file);
 
-
-    vector<Data> test_data_set = LoadTestData(testFile);
-    auto t3 = chrono::steady_clock::now();
-    printf("测试集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(t3 - t2).count());
-
-
-    LR logist(train_data_set);
-
+#ifdef OFFLINE
     auto t4 = chrono::steady_clock::now();
+#endif
+
     logist.train();
-    auto t5 = chrono::steady_clock::now();
-    printf("模型初始化及训练时间（ms）: %f \n", chrono::duration<double, std::milli>(t5 - t4).count());
 
-    logist.predict(test_data_set);
-    auto t6 = chrono::steady_clock::now();
-    printf("模型预测（ms）: %f \n", chrono::duration<double, std::milli>(t6 - t5).count());
+    logist.predict();
 
 
-    StorePredict(logist.GetPredictVec(), predictFile);
-
-#ifdef TEST
-    Test(answerFile, predictFile);
+#ifdef OFFLINE
+    Test(answer_file, predict_file);
 #endif
 
     return 0;
