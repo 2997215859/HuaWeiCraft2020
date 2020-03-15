@@ -7,10 +7,13 @@
 #include <climits>
 #include <chrono>
 #include <cfloat>
+#include <cstring>
 
 
 using namespace std;
 
+
+const int features_num = 1000;
 
 struct Data {
     vector<double> features;
@@ -20,59 +23,53 @@ struct Data {
 };
 
 
-
-
 vector<Data> LoadData(const string & filename, bool last_label_exist ,int read_line_num)
 {
 
-    ifstream infile(filename.c_str());
-    string line;
+//    ifstream infile(filename.c_str());
+//    string line;
+//
+//    if (!infile) {
+//        cout << "打开训练文件失败" << endl;
+//        exit(0);
+//    }
 
-    if (!infile) {
-        cout << "打开训练文件失败" << endl;
-        exit(0);
-    }
+    FILE * fp = NULL;
+    char * line, * record;
+    char buffer[20000];
+
+
+    if ((fp = fopen(filename.c_str(), "rb")) == NULL) exit(1);
 
     vector<Data> data_set;
     int cnt = 0;
-    while (infile) {
-        getline(infile, line);
-        if (line.size() > 0) {
+    while ((line = fgets(buffer, sizeof(buffer), fp)) != NULL) {
 
-            if (last_label_exist && cnt >= read_line_num) break;
+        if (last_label_exist && cnt >= read_line_num) break;
+        cnt++;
 
-            cnt++;
+        vector<double> feature(features_num + (last_label_exist? 1: 0), 0.0);
 
-            stringstream sin(line);
-            char ch;
-            double dataV;
-            int i = 0;
-            vector<double> feature;
+        int f_cnt = 0;
+        record = strtok(line, ",");
+        while (record != NULL) {
+//            printf("%s ", record);
+            feature[f_cnt++] = atof(record);
+            record = strtok(NULL, ","); // 每个特征值
+        }
 
-            while (sin) {
-                char c = sin.peek();
-                if (int(c) != -1) {
-                    sin >> dataV;
-                    feature.push_back(dataV);
-                    sin >> ch;
-                    i++;
-                } else {
-                    printf("训练文件数据格式不正确，出错行为[%d]行", data_set.size() + 1);
-                    exit(1);
-                }
-            }
-
-            if (last_label_exist) {
-                int ftf = (int) feature.back();
-                feature.pop_back();
-                data_set.push_back(Data(feature, ftf));
-            } else {
-                data_set.push_back(Data(feature, 0));
-            }
-
+        if (last_label_exist) {
+            int ftf = (int) feature.back();
+            feature.pop_back();
+            data_set.push_back(Data(feature, ftf));
+        } else {
+            data_set.push_back(Data(feature, 0));
         }
     }
-    infile.close();
+    fclose(fp);
+    fp = NULL;
+
+
     return data_set;
 }
 
@@ -212,10 +209,7 @@ private:
 
     void initParam()
     {
-        weight_.clear();
-        for (int i = 0; i < features_num_; i++) {
-            weight_.push_back(wtInitV);
-        }
+        weight_ = std::move(vector<double>(features_num, wtInitV));
     }
 
     double wxbCalc(const Data &data, const vector<double> weight) {
@@ -245,6 +239,7 @@ private:
         lossV /= train_data_.size();
         return lossV;
     }
+
     double gradientSlope(const vector<Data> &dataSet, int index, const vector<double> &sigmoidVec) {
         double gsV = 0.0L;
         int i;
@@ -280,7 +275,6 @@ private:
     string train_file_;
     string test_file_;
     string predict_file_;
-    const int features_num_ = 1000;
     const int read_line_num = 4000;
 private:
 
@@ -351,6 +345,9 @@ void Test (string answerFile, string predictFile) {
 int main(int argc, char *argv[])
 {
 
+#ifdef OFFLINE
+    auto start_time = chrono::steady_clock::now();
+#endif
 
 #ifdef OFFLINE // 线下测试用的数据路径
     string train_file = "../data/train_data.txt";
@@ -374,6 +371,11 @@ int main(int argc, char *argv[])
 
     logist.predict();
 
+
+#ifdef OFFLINE
+    auto end_time = chrono::steady_clock::now();
+    printf("总耗时（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+#endif
 
 #ifdef OFFLINE
     Test(answer_file, predict_file);
