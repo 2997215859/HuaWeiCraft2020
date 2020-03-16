@@ -16,13 +16,12 @@
 
 using namespace std;
 
-
 const int features_num = 1000;
 
 struct Data {
-    vector<double> features;
+    vector<float> features;
     int label;
-    Data(vector<double> f, int l) : features(f), label(l)
+    Data(vector<float> f, int l) : features(f), label(l)
     {}
 };
 
@@ -40,9 +39,9 @@ private:
     vector<Data> test_data_;
     vector<int> predict_vec;
 
-    vector<double> weight_;
-    vector<double> min_error_weight_;
-    double min_error_rate_;
+    vector<float> weight_;
+    vector<float> min_error_weight_;
+    float min_error_rate_;
     int min_error_iter_no_;
 
     string weightParamFile = "modelweight.txt";
@@ -55,11 +54,12 @@ private:
 
     void initParam();
 
-    double wxbCalc(const Data &data, const vector<double> weight);
-    double sigmoidCalc(const double wxb);
-    double lossCal(const vector<double> & weight);
+    float dot (const vector<float> & vec1, const vector<float> & vec2);
+    float wxbCalc(const Data &data, const vector<float> & weight);
+    float sigmoidCalc(const float wxb);
+    float lossCal(const vector<float> & weight);
 
-    double gradientSlope(const vector<Data> & dataSet, int index, const vector<double> & sigmoidVec);
+    float gradientSlope(const vector<Data> & dataSet, int index, const vector<float> & sigmoidVec);
     void StorePredict();
 
 private:
@@ -69,14 +69,14 @@ private:
     const int read_line_num = 4000;
 private:
 
-    const double wtInitV = 1.0;
+    const float wtInitV = 1;
 
-    const double rate_start = 0.9;
-    const double decay = 0.05;
-    const double rate_min = 0.02;
+    const float rate_start = 0.9;
+    const float decay = 0.05;
+    const float rate_min = 0.02;
 
     const int maxIterTimes = 200;
-    const double predictTrueThresh = 0.5;
+    const float predictTrueThresh = 0.5;
     const int train_show_step = 1;
 };
 
@@ -89,10 +89,10 @@ void LR::train() {
     chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
 #endif
 
-    double sigmoidVal;
-    double wxbVal;
+    float sigmoidVal;
+    float wxbVal;
 
-    vector<double> sigmoidVec(train_data_.size(), 0.0);
+    vector<float> sigmoidVec(train_data_.size(), 0.0);
 
     for (int i = 0; i < maxIterTimes; i++) {
 
@@ -102,7 +102,7 @@ void LR::train() {
             sigmoidVec[j] = sigmoidVal;
         }
 
-        double error_rate = 0.0;
+        float error_rate = 0.0;
         for (int j = 0; j < train_data_.size(); j++) {
             error_rate += pow(train_data_[j].label - sigmoidVec[j], 2);
         }
@@ -114,7 +114,7 @@ void LR::train() {
         }
 
 
-        double rate = rate_start * 1.0 / (1.0 + decay * i);
+        float rate = rate_start * 1.0 / (1.0 + decay * i);
         rate = max(rate, rate_min);
 
         for (int j = 0; j < weight_.size(); j++) {
@@ -136,7 +136,7 @@ void LR::train() {
 
 #ifdef OFFLINE
     chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("模型训练时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+    printf("模型训练时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
 #endif
 
 }
@@ -149,7 +149,7 @@ void LR::predict() {
     chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
 #endif
 
-    double sigVal;
+    float sigVal;
     int predictVal;
 
     for (int j = 0; j < test_data_.size(); j++) {
@@ -160,7 +160,7 @@ void LR::predict() {
 
 #ifdef OFFLINE
     chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("模型预测时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+    printf("模型预测时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
 #endif
 
     StorePredict();
@@ -182,51 +182,53 @@ LR::LR(const string & train_file, const string & test_file, const string & predi
 }
 
 
-void LR::LoadTrainData() {
+inline void LR::LoadTrainData() {
 #ifdef OFFLINE
     chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
 #endif
     train_data_ = LoadData(train_file_, true, read_line_num);
 #ifdef OFFLINE
     chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("训练集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+    printf("训练集读取时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
 #endif
 }
 
-void LR::LoadTestData() {
+inline void LR::LoadTestData() {
 #ifdef OFFLINE
     chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
 #endif
     test_data_ = LoadData(test_file_, false, -1);
 #ifdef OFFLINE
     chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("测试集读取时间（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+    printf("测试集读取时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
 #endif
 }
 
-void LR::initParam()
+inline void LR::initParam()
 {
-    weight_ = vector<double>(features_num, wtInitV);
+    weight_ = vector<float>(features_num, wtInitV);
 }
 
-double LR::wxbCalc(const Data &data, const vector<double> weight) {
-    double mulSum = 0.0L;
-    double wtv, feav;
-    for (int i = 0; i < weight.size(); i++) {
-        wtv = weight[i];
-        feav = data.features[i];
-        mulSum += wtv * feav;
+inline float LR::dot (const vector<float> & vec1, const vector<float> & vec2) {
+    float sum = 0.0;
+    for (int i = 0; i < vec1.size(); i++) {
+        sum += vec1[i] * vec2[i];
     }
-
-    return mulSum;
+    return sum;
 }
-double LR::sigmoidCalc(const double wxb) {
-    double expv = exp(-1 * wxb);
-    double expvInv = 1 / (1 + expv);
+
+inline float LR::wxbCalc(const Data & data, const vector<float> & weight) {
+
+    return dot(data.features, weight);
+
+}
+inline float LR::sigmoidCalc(const float wxb) {
+    float expv = exp(-1 * wxb);
+    float expvInv = 1 / (1 + expv);
     return expvInv;
 }
-double LR::lossCal(const vector<double> & weight) {
-    double lossV = 0.0L;
+inline float LR::lossCal(const vector<float> & weight) {
+    float lossV = 0.0L;
     int i;
 
     for (i = 0; i < train_data_.size(); i++) {
@@ -237,10 +239,10 @@ double LR::lossCal(const vector<double> & weight) {
     return lossV;
 }
 
-double LR::gradientSlope(const vector<Data> & dataSet, int index, const vector<double> & sigmoidVec) {
-    double gsV = 0.0L;
+inline float LR::gradientSlope(const vector<Data> & dataSet, int index, const vector<float> & sigmoidVec) {
+    float gsV = 0.0L;
     int i;
-    double sigv, label;
+    float sigv, label;
     for (i = 0; i < dataSet.size(); i++) {
         sigv = sigmoidVec[i];
         label = dataSet[i].label;
@@ -251,7 +253,7 @@ double LR::gradientSlope(const vector<Data> & dataSet, int index, const vector<d
     return gsV;
 }
 
-vector<Data> LR::LoadData(const string & filename, bool last_label_exist ,int read_line_num)
+inline vector<Data> LR::LoadData(const string & filename, bool last_label_exist ,int read_line_num)
 {
 
     FILE * fp = NULL;
@@ -271,7 +273,7 @@ vector<Data> LR::LoadData(const string & filename, bool last_label_exist ,int re
         if (last_label_exist && cnt >= read_line_num) break;
         cnt++;
 
-        vector<double> feature(features_num + (last_label_exist? 1: 0), 0.0);
+        vector<float> feature(features_num + (last_label_exist? 1: 0), 0.0);
 
         int f_cnt = 0;
         record = strtok(line, ",");
@@ -297,7 +299,7 @@ vector<Data> LR::LoadData(const string & filename, bool last_label_exist ,int re
 }
 
 
-void LR::StorePredict()
+inline void LR::StorePredict()
 {
     string line;
     int i = 0;
@@ -341,7 +343,7 @@ void Test (string answerFile, string predictFile) {
     vector<int> answerVec;
     vector<int> predictVec;
     int correctCount;
-    double accurate;
+    float accurate;
 
     cout << "ready to load answer data" << endl;
     loadAnswerData(answerFile, answerVec);
@@ -359,7 +361,7 @@ void Test (string answerFile, string predictFile) {
         }
     }
 
-    accurate = ((double)correctCount) / answerVec.size();
+    accurate = ((float)correctCount) / answerVec.size();
     cout << "the prediction accuracy is " << accurate << endl;
 }
 
@@ -395,7 +397,7 @@ int main(int argc, char *argv[])
 
 #ifdef OFFLINE
     chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("总耗时（ms）: %f \n", chrono::duration<double, std::milli>(end_time - start_time).count());
+    printf("总耗时（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
 #endif
 
 #ifdef TEST
