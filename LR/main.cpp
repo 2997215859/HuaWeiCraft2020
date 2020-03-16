@@ -10,6 +10,8 @@
 #include <cfloat>
 #include <cstring>
 
+#include <arm_neon.h>
+
 #ifdef OFFLINE
 #include <chrono>
 #endif
@@ -210,10 +212,29 @@ inline void LR::initParam()
 }
 
 inline float LR::dot (const vector<float> & vec1, const vector<float> & vec2) {
-    float sum = 0.0;
-    for (int i = 0; i < vec1.size(); i++) {
-        sum += vec1[i] * vec2[i];
+
+    int len = vec1.size();
+    const float * p_vec1 = &vec1[0];
+    const float * p_vec2 = &vec2[0];
+
+
+    float sum=0;
+    float32x4_t sum_vec = vdupq_n_f32(0),left_vec,right_vec;
+    for(int i = 0; i < len; i += 4)
+    {
+        left_vec = vld1q_f32(p_vec1 + i);
+        right_vec = vld1q_f32(p_vec2 + i);
+        sum_vec = vmlaq_f32(sum_vec, left_vec, right_vec);
     }
+
+    float32x2_t r = vadd_f32(vget_high_f32(sum_vec), vget_low_f32(sum_vec));
+    sum += vget_lane_f32(vpadd_f32(r,r),0);
+
+
+//    float sum = 0.0;
+//    for (int i = 0; i < vec1.size(); i++) {
+//        sum += vec1[i] * vec2[i];
+//    }
     return sum;
 }
 
