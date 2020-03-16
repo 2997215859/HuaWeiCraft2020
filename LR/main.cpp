@@ -76,7 +76,7 @@ private:
     const float decay = 0.0001;
     const float rate_min = 0.02;
 
-    const int maxIterTimes = 150;
+    const int maxIterTimes = 100;
     const float predictTrueThresh = 0.5;
     const int train_show_step = 1;
 };
