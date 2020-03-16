@@ -67,16 +67,16 @@ private:
     string train_file_;
     string test_file_;
     string predict_file_;
-    const int read_line_num = 800;
+    const int read_line_num = 1000;
 private:
 
     const float wtInitV = 1;
 
-    const float rate_start = 0.9;
-    const float decay = 0.05;
+    float rate_start = 0.9;
+    const float decay = 0.0001;
     const float rate_min = 0.02;
 
-    const int maxIterTimes = 120;
+    const int maxIterTimes = 150;
     const float predictTrueThresh = 0.5;
     const int train_show_step = 1;
 };
@@ -122,8 +122,11 @@ void LR::train() {
         }
 
 
-        float rate = rate_start * 1.0 / (1.0 + decay * i);
-        rate = max(rate, rate_min);
+//        float rate = rate_start * 1.0 / (1.0 + decay * i);
+//        rate = max(rate, rate_min);
+
+        rate_start = rate_start * 1.0 / (1.0 + decay * i);
+        float rate = max(rate_start, rate_min);
 
         for (int j = 0; j < weight_.size(); j++) {
             weight_[j] += rate * gradientSlope(train_data_, j, sigmoidVec);
