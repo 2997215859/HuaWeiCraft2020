@@ -10,10 +10,8 @@
 #include <cfloat>
 #include <cstring>
 
+#ifndef NO_NEON
 #include <arm_neon.h>
-
-#ifdef OFFLINE
-#include <chrono>
 #endif
 
 using namespace std;
@@ -58,8 +56,7 @@ private:
     void initParam();
 
     float dot (const vector<float> & vec1, const vector<float> & vec2);
-    float dot2 (const vector<float> & vec1, const vector<float> & vec2);
-    float wxbCalc(const Data &data, const vector<float> & weight);
+
     float sigmoidCalc(const float wxb);
     float lossCal(const vector<float> & weight);
 
@@ -70,7 +67,7 @@ private:
     string train_file_;
     string test_file_;
     string predict_file_;
-    const int read_line_num = 4000;
+    const int read_line_num = 800;
 private:
 
     const float wtInitV = 1;
@@ -79,7 +76,7 @@ private:
     const float decay = 0.05;
     const float rate_min = 0.02;
 
-    const int maxIterTimes = 200;
+    const int maxIterTimes = 120;
     const float predictTrueThresh = 0.5;
     const int train_show_step = 1;
 };
@@ -96,8 +93,8 @@ void LR::train() {
 
     LoadTrainData();
 
-#ifdef OFFLINE
-    chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
+#ifdef TEST
+    clock_t start_time = clock();
 #endif
 
     float sigmoidVal;
@@ -108,7 +105,7 @@ void LR::train() {
     for (int i = 0; i < maxIterTimes; i++) {
 
         for (int j = 0; j < train_data_.size(); j++) {
-            wxbVal = wxbCalc(train_data_[j], weight_);
+            wxbVal = dot(train_data_[j].features, weight_);
             sigmoidVal = sigmoidCalc(wxbVal);
             sigmoidVec[j] = sigmoidVal;
         }
@@ -132,7 +129,7 @@ void LR::train() {
             weight_[j] += rate * gradientSlope(train_data_, j, sigmoidVec);
         }
 
-#ifdef OFFLINE
+#ifdef TEST
         if (i % train_show_step == 0) {
             cout << "iter: " << i << " error_rate: " << error_rate << " rate: " << rate;
 //                cout << ". updated weight value is : ";
@@ -145,9 +142,9 @@ void LR::train() {
     }
 
 
-#ifdef OFFLINE
-    chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("模型训练时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
+#ifdef TEST
+    clock_t end_time = clock();
+    printf("模型训练时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
 #endif
 
 }
@@ -156,28 +153,28 @@ void LR::predict() {
 
     LoadTestData();
 
-#ifdef OFFLINE
-    chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
+#ifdef TEST
+    clock_t start_time = clock();
 #endif
 
     float sigVal;
     int predictVal;
 
     for (int j = 0; j < test_data_.size(); j++) {
-        sigVal = sigmoidCalc(wxbCalc(test_data_[j], min_error_weight_));
+        sigVal = sigmoidCalc(dot(test_data_[j].features, min_error_weight_));
         predictVal = sigVal >= predictTrueThresh ? 1 : 0;
         predict_vec.push_back(predictVal);
     }
 
-#ifdef OFFLINE
-    chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("模型预测时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
+#ifdef TEST
+    clock_t end_time = clock();
+    printf("模型预测时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
 #endif
 
     StorePredict();
 
 
-#ifdef OFFLINE
+#ifdef TEST
     cout << "min_error_iter_no: " << min_error_iter_no_ << " min_error_rate: " << min_error_rate_ << endl;
 #endif
 
@@ -194,24 +191,24 @@ LR::LR(const string & train_file, const string & test_file, const string & predi
 
 
 inline void LR::LoadTrainData() {
-#ifdef OFFLINE
-    chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
+#ifdef TEST
+    clock_t start_time = clock();
 #endif
     train_data_ = LoadData(train_file_, true, read_line_num);
-#ifdef OFFLINE
-    chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("训练集读取时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
+#ifdef TEST
+    clock_t end_time = clock();
+    printf("训练集读取时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
 #endif
 }
 
 inline void LR::LoadTestData() {
-#ifdef OFFLINE
-    chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
+#ifdef TEST
+    clock_t start_time = clock();
 #endif
     test_data_ = LoadData(test_file_, false, -1);
-#ifdef OFFLINE
-    chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("测试集读取时间（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
+#ifdef TEST
+    clock_t end_time = clock();
+    printf("测试集读取时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
 #endif
 }
 
@@ -220,32 +217,10 @@ inline void LR::initParam()
     weight_ = vector<float>(features_num, wtInitV);
 }
 
-inline float LR::dot2 (const vector<float> & vec1, const vector<float> & vec2) {
-    int len = vec1.size();
-    const float * p_vec1 = &vec1[0];
-    const float * p_vec2 = &vec2[0];
 
-
-    float32x4_t vec1_q, vec2_q;
-    float32x4_t sum_q = {0.0, 0.0, 0.0, 0.0};
-    float32x2_t tmp[2];
-    float result = 0.0;
-    for (int i = 0; i < (len & ~3); i += 4) {
-        vec1_q = vld1q_f32(p_vec1 + i);
-        vec2_q = vld1q_f32(p_vec2 + i);
-        sum_q = vmlaq_f32(sum_q, vec1_q, vec2_q);
-    }
-    tmp[0] = vget_high_f32(sum_q);
-    tmp[1] = vget_low_f32(sum_q);
-    tmp[0] = vpadd_f32(tmp[0], tmp[1]);
-    tmp[0] = vpadd_f32(tmp[0], tmp[0]);
-    result = vget_lane_f32(tmp[0], 0);
-
-    return result;
-
-}
 inline float LR::dot (const vector<float> & vec1, const vector<float> & vec2) {
 
+#ifndef NO_NEON
     int len = vec1.size();
     const float * p_vec1 = &vec1[0];
     const float * p_vec2 = &vec2[0];
@@ -262,20 +237,16 @@ inline float LR::dot (const vector<float> & vec1, const vector<float> & vec2) {
 
     float32x2_t r = vadd_f32(vget_high_f32(sum_vec), vget_low_f32(sum_vec));
     sum += vget_lane_f32(vpadd_f32(r,r),0);
-
-
-//    float sum = 0.0;
-//    for (int i = 0; i < vec1.size(); i++) {
-//        sum += vec1[i] * vec2[i];
-//    }
+#else
+    float sum = 0.0;
+    for (int i = 0; i < vec1.size(); i++) {
+        sum += vec1[i] * vec2[i];
+    }
+#endif
     return sum;
 }
 
-inline float LR::wxbCalc(const Data & data, const vector<float> & weight) {
 
-    return dot(data.features, weight);
-
-}
 inline float LR::sigmoidCalc(const float wxb) {
     float expv = exp(-1 * wxb);
     float expvInv = 1 / (1 + expv);
@@ -286,8 +257,8 @@ inline float LR::lossCal(const vector<float> & weight) {
     int i;
 
     for (i = 0; i < train_data_.size(); i++) {
-        lossV -= train_data_[i].label * log(sigmoidCalc(wxbCalc(train_data_[i], weight)));
-        lossV -= (1 - train_data_[i].label) * log(1 - sigmoidCalc(wxbCalc(train_data_[i], weight)));
+        lossV -= train_data_[i].label * log(sigmoidCalc(dot(train_data_[i].features, weight)));
+        lossV -= (1 - train_data_[i].label) * log(1 - sigmoidCalc(dot(train_data_[i].features, weight)));
     }
     lossV /= train_data_.size();
     return lossV;
@@ -295,9 +266,8 @@ inline float LR::lossCal(const vector<float> & weight) {
 
 inline float LR::gradientSlope(const vector<Data> & dataSet, int index, const vector<float> & sigmoidVec) {
     float gsV = 0.0L;
-    int i;
     float sigv, label;
-    for (i = 0; i < dataSet.size(); i++) {
+    for (int i = 0; i < dataSet.size(); i++) {
         sigv = sigmoidVec[i];
         label = dataSet[i].label;
         gsV += (label - sigv) * (dataSet[i].features[index]);
@@ -423,14 +393,11 @@ int main(int argc, char *argv[])
 {
 
 #ifdef TEST
-    time_t t_start = time(NULL) ;
+    clock_t start_time = clock() ;
 #endif
 
-#ifdef OFFLINE
-    chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
-#endif
 
-#ifdef OFFLINE // 线下测试用的数据路径
+#ifdef TEST // 线下测试用的数据路径
     string train_file = "../data/train_data.txt";
     string test_file = "../data/test_data.txt";
     string predict_file = "../data/result.txt";
@@ -444,23 +411,15 @@ int main(int argc, char *argv[])
 
     LR logist(train_file, test_file, predict_file);
 
-#ifdef OFFLINE
-    chrono::steady_clock::time_point t4 = chrono::steady_clock::now();
-#endif
 
     logist.train();
 
     logist.predict();
 
 
-#ifdef OFFLINE
-    chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
-    printf("总耗时（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
-#endif
-
 #ifdef TEST
-    time_t t_end = time(NULL);
-    cout << "endTime - beginTime: " << difftime(t_end, t_start) <<endl;
+    clock_t end_time = clock();
+    printf("总耗时（s）: %f \n", (double) ((double) (end_time - start_time) / CLOCKS_PER_SEC) / CLOCKS_PER_SEC);
 #endif
 
 #ifdef TEST
