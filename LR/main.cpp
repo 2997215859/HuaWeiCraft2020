@@ -35,6 +35,7 @@ public:
     void predict();
 
     LR(const string & train_file, const string & test_file, const string & predict_file);
+    float fast_exp(float x);
 
 private:
     vector<Data> train_data_;
@@ -57,6 +58,7 @@ private:
     void initParam();
 
     float dot (const vector<float> & vec1, const vector<float> & vec2);
+    float dot2 (const vector<float> & vec1, const vector<float> & vec2);
     float wxbCalc(const Data &data, const vector<float> & weight);
     float sigmoidCalc(const float wxb);
     float lossCal(const vector<float> & weight);
@@ -81,6 +83,13 @@ private:
     const float predictTrueThresh = 0.5;
     const int train_show_step = 1;
 };
+
+inline float LR::fast_exp(float x) {
+    union {uint32_t i;float f;} v;
+    v.i=(1<<23)*(1.4426950409*x+126.93490512f);
+
+    return v.f;
+}
 
 
 void LR::train() {
@@ -211,6 +220,30 @@ inline void LR::initParam()
     weight_ = vector<float>(features_num, wtInitV);
 }
 
+inline float LR::dot2 (const vector<float> & vec1, const vector<float> & vec2) {
+    int len = vec1.size();
+    const float * p_vec1 = &vec1[0];
+    const float * p_vec2 = &vec2[0];
+
+
+    float32x4_t vec1_q, vec2_q;
+    float32x4_t sum_q = {0.0, 0.0, 0.0, 0.0};
+    float32x2_t tmp[2];
+    float result = 0.0;
+    for (int i = 0; i < (len & ~3); i += 4) {
+        vec1_q = vld1q_f32(p_vec1 + i);
+        vec2_q = vld1q_f32(p_vec2 + i);
+        sum_q = vmlaq_f32(sum_q, vec1_q, vec2_q);
+    }
+    tmp[0] = vget_high_f32(sum_q);
+    tmp[1] = vget_low_f32(sum_q);
+    tmp[0] = vpadd_f32(tmp[0], tmp[1]);
+    tmp[0] = vpadd_f32(tmp[0], tmp[0]);
+    result = vget_lane_f32(tmp[0], 0);
+
+    return result;
+
+}
 inline float LR::dot (const vector<float> & vec1, const vector<float> & vec2) {
 
     int len = vec1.size();
@@ -389,6 +422,10 @@ void Test (string answerFile, string predictFile) {
 int main(int argc, char *argv[])
 {
 
+#ifdef TEST
+    time_t t_start = time(NULL) ;
+#endif
+
 #ifdef OFFLINE
     chrono::steady_clock::time_point start_time = chrono::steady_clock::now();
 #endif
@@ -419,6 +456,11 @@ int main(int argc, char *argv[])
 #ifdef OFFLINE
     chrono::steady_clock::time_point end_time = chrono::steady_clock::now();
     printf("总耗时（ms）: %f \n", chrono::duration<float, std::milli>(end_time - start_time).count());
+#endif
+
+#ifdef TEST
+    time_t t_end = time(NULL);
+    cout << "endTime - beginTime: " << difftime(t_end, t_start) <<endl;
 #endif
 
 #ifdef TEST
