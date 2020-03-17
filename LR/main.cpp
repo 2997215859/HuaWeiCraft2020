@@ -357,7 +357,7 @@ inline vector<Data> LR::LoadData(const string & filename, bool last_label_exist)
     fp = NULL;
 
 #ifdef TEST
-    printf("0 数量: %d, 1 数量: %d", label0_cnt, label1_cnt);
+    printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
 #endif
 
     return data_set;
@@ -418,7 +418,7 @@ void Test (string answerFile, string predictFile) {
     correctCount = 0;
     int alb0_cnt = 0;
     int alb1_cnt = 0;
-    for (int j = 0; j < predictVec.size(); j++) {
+    for (int j = 0; j < answerVec.size(); j++) {
         if (j < answerVec.size()) {
             if (answerVec[j] == 0) {
                 alb0_cnt++;
@@ -448,7 +448,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST // 线下测试用的数据路径
     string train_file = "../data/train_data.txt";
-    string test_file = "../data/test_data.txt";
+    string test_file = "../data/test_data2.txt";
     string predict_file = "../data/result.txt";
     string answer_file = "../data/answer.txt";
 #else // 提交到线上，官方要求的数据路径
@@ -457,6 +457,7 @@ int main(int argc, char *argv[])
     string predict_file = "/projects/student/result.txt";
     string answer_file = "/projects/student/answer.txt";
 #endif
+
 
     LR logist(train_file, test_file, predict_file);
 
@@ -468,7 +469,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST
     clock_t end_time = clock();
-    printf("总耗时（s）: %f \n", (double) ((double) (end_time - start_time) / CLOCKS_PER_SEC) / CLOCKS_PER_SEC);
+    printf("总耗时（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
 #endif
 
 #ifdef TEST
