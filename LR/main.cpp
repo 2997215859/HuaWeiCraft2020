@@ -77,13 +77,13 @@ private:
 
 private:
 
-    const float wtInitV = 1;
+    const float wtInitV = 0.1;
 
-    float rate_start = 0.99;
+    float rate_start = 1.2;
     const float decay = 0.01;
-    const float rate_min = 0.04;
+    const float rate_min = 0.001;
 
-    const int maxIterTimes = 100;
+    const int maxIterTimes = 50;
     const float predictTrueThresh = 0.5;
     const int train_show_step = 1;
 };
@@ -174,6 +174,7 @@ void LR::predict() {
 
     for (int j = 0; j < test_data_.size(); j++) {
         sigVal = sigmoidCalc(dot(test_data_[j].features, min_error_weight_));
+//        sigVal = sigmoidCalc(dot(test_data_[j].features, weight_));
         predictVal = sigVal >= predictTrueThresh ? 1 : 0;
         predict_vec.push_back(predictVal);
     }
