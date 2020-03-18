@@ -21,8 +21,8 @@ const int features_num = 1000;
 
 //const int read_line_num = 1000;
 
-const int read_line_num0 = 226;
-const int read_line_num1 = 450;
+const int read_line_num0 = 300;
+const int read_line_num1 = 200;
 
 
 struct Data {
@@ -80,7 +80,7 @@ private:
     const float wtInitV = 0.1;
 
     float rate_start = 1.2;
-    const float decay = 0.01;
+    const float decay = 1300;
     const float rate_min = 0.001;
 
     const int maxIterTimes = 50;
@@ -132,8 +132,11 @@ void LR::train() {
 //        float rate = rate_start * 1.0 / (1.0 + decay * i);
 //        rate = max(rate, rate_min);
 
-        rate_start = rate_start * 1.0 / (1.0 + decay * i);
-        float rate = max(rate_start, rate_min);
+//        rate_start = rate_start * 1.0 / (1.0 + decay * i);
+//        float rate = max(rate_start, rate_min);
+
+        float rate = rate_min + (rate_start- rate_min) * exp(-i/decay);
+
 
 //        float rate = 0.50;
 
@@ -455,7 +458,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST // 线下测试用的数据路径
     string train_file = "../data/train_data.txt";
-    string test_file = "../data/test_data2.txt";
+    string test_file = "../data/test_data.txt";
     string predict_file = "../data/result.txt";
     string answer_file = "../data/answer.txt";
 #else // 提交到线上，官方要求的数据路径
