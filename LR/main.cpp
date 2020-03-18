@@ -296,7 +296,7 @@ inline vector<Data> LR::LoadData(const string & filename, bool last_label_exist)
 
     FILE * fp = NULL;
     char * line, * record;
-    char buffer[20000];
+    char buffer[8192];
 
 
     if ((fp = fopen(filename.c_str(), "rb")) == NULL) {
@@ -316,11 +316,18 @@ inline vector<Data> LR::LoadData(const string & filename, bool last_label_exist)
 
         int f_cnt = 0;
         record = strtok(line, ",");
+        int flag = 0;
         while (record != NULL) {
 //            printf("%s ", record);
             feature[f_cnt++] = atof(record);
+            if (feature[f_cnt - 1] < 0) {
+                flag = 1;
+                break;
+            }
             record = strtok(NULL, ","); // 每个特征值
         }
+
+        if (flag) continue;
 
 
         if (last_label_exist && (label0_cnt < read_line_num0 || label1_cnt < read_line_num1)) {
@@ -335,7 +342,7 @@ inline vector<Data> LR::LoadData(const string & filename, bool last_label_exist)
             }
 
         } else {
-            data_set.push_back(Data(feature, 0));
+            data_set.emplace_back(Data(feature, 0));
         }
 //        if (last_label_exist) {
 //            int ftf = (int) feature.back();
