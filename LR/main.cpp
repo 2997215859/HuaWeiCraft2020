@@ -14,6 +14,12 @@
 #include <arm_neon.h>
 #endif
 
+char buf[1<<22],*p1=buf,*p2=buf;
+
+inline int getc(FILE * fp){
+    return p1==p2&&(p2=(p1=buf)+fread(buf,1,1<<21, fp),p1==p2)?EOF:*p1++;
+}
+
 using namespace std;
 
 const int features_num = 1000;
@@ -31,6 +37,163 @@ struct Data {
     Data(vector<float> f, int l) : features(f), label(l)
     {}
 };
+
+inline float GetOneFloatData(FILE * fp) {
+
+    int f = 1;
+    char ch = getc(fp);
+
+    if (ch == char(EOF)) return -2;
+
+    if (ch == '-') {f = -1; ch = getc(fp);}
+
+
+    float ret = ch - '0';
+    ret *= 1000;
+
+    getc(fp); // 点号
+
+    ch = getc(fp);
+
+    ret += (ch - '0') * 100;
+    ch = getc(fp);
+
+    ret += (ch - '0') * 10;
+
+    ch = getc(fp);
+
+    ret += (ch - '0');
+    return ret * f / 1000.0;
+}
+
+
+
+vector<Data> LoadData(const string & filename, bool last_label_exist)
+{
+
+    FILE * fp = NULL;
+    char * line, * record;
+
+
+    if ((fp = fopen(filename.c_str(), "rb")) == NULL) {
+        printf("file [%s] doesnnot exist \n", filename.c_str());
+        exit(1);
+    }
+
+    vector<Data> data_set;
+    int label0_cnt = 0;
+    int label1_cnt = 0;
+
+    while (true) {
+
+        vector<float> feature(features_num + (last_label_exist? 1: 0), 0.0);
+
+        if (last_label_exist && label0_cnt >= read_line_num0 && label1_cnt >= read_line_num1) break;
+
+        int f_cnt = 0;
+        int eof_flag = 0;
+        int neg_flag = 0;
+        while (f_cnt < features_num) {
+            float f = GetOneFloatData(fp);
+            if (f == -2) {eof_flag = 1; break;}
+            if (f < 0) {neg_flag = 1;}
+            feature[f_cnt++] = f;
+            getc(fp);
+        }
+
+        if (eof_flag) break;
+
+        if (last_label_exist) {
+            feature[f_cnt] =  getc(fp) - '0';
+            getc(fp); // 获取回车键
+        }
+
+        if (neg_flag) continue;
+
+
+        if (last_label_exist && (label0_cnt < read_line_num0 || label1_cnt < read_line_num1)) {
+            int ftf = (int) feature.back();
+            feature.pop_back();
+            data_set.emplace_back(Data(feature, ftf));
+
+            if (ftf == 0) {
+                label0_cnt++;
+            } else {
+                label1_cnt++;
+            }
+
+        } else {
+            data_set.emplace_back(Data(feature, 0));
+        }
+
+    }
+
+    fclose(fp);
+    fp = NULL;
+
+#ifdef TEST
+    printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
+#endif
+
+    memset(buf, 0, sizeof(buf) / sizeof(char));
+    p1 = buf;
+    p2 = buf;
+    return data_set;
+
+//    while ((line = fgets(buffer, sizeof(buffer), fp)) != NULL) {
+//
+//        if (last_label_exist && label0_cnt >= read_line_num0 && label1_cnt >= read_line_num1) break;
+//
+//        vector<float> feature(features_num + (last_label_exist? 1: 0), 0.0);
+//
+//        int f_cnt = 0;
+//        record = strtok(line, ",");
+//        int flag = 0;
+//        while (record != NULL) {
+////            printf("%s ", record);
+//            feature[f_cnt++] = atof(record);
+//            if (feature[f_cnt - 1] < 0) {
+//                flag = 1;
+//                break;
+//            }
+//            record = strtok(NULL, ","); // 每个特征值
+//        }
+//
+//        if (flag) continue;
+//
+//
+//        if (last_label_exist && (label0_cnt < read_line_num0 || label1_cnt < read_line_num1)) {
+//            int ftf = (int) feature.back();
+//            feature.pop_back();
+//            data_set.push_back(Data(feature, ftf));
+//
+//            if (ftf == 0) {
+//                label0_cnt++;
+//            } else {
+//                label1_cnt++;
+//            }
+//
+//        } else {
+//            data_set.emplace_back(Data(feature, 0));
+//        }
+////        if (last_label_exist) {
+////            int ftf = (int) feature.back();
+////            feature.pop_back();
+////
+////            if (ftf == 0 && label0_cnt < read_line_num0 ) {
+////                data_set.push_back(Data(feature, ftf));
+////                label0_cnt++;
+////            } else if (ftf == 1 && label1_cnt < read_line_num1) {
+////                data_set.push_back(Data(feature, ftf));
+////                label1_cnt++;
+////            }
+//
+////        } else {
+////            data_set.push_back(Data(feature, 0));
+////        }
+//    }
+
+}
 
 
 class LR {
@@ -55,7 +218,7 @@ private:
     string weightParamFile = "modelweight.txt";
 
 private:
-    vector<Data> LoadData(const string & filename, bool last_label_exist);
+//    vector<Data> LoadData(const string & filename, bool last_label_exist);
     void LoadTrainData();
 
     void LoadTestData();
@@ -165,6 +328,7 @@ void LR::train() {
 }
 
 void LR::predict() {
+
 
     LoadTestData();
 
@@ -294,85 +458,6 @@ inline float LR::gradientSlope(const vector<Data> & dataSet, int index, const ve
     return gsV;
 }
 
-inline vector<Data> LR::LoadData(const string & filename, bool last_label_exist)
-{
-
-    FILE * fp = NULL;
-    char * line, * record;
-    char buffer[8192];
-
-
-    if ((fp = fopen(filename.c_str(), "rb")) == NULL) {
-        printf("file [%s] doesnnot exist \n", filename.c_str());
-        exit(1);
-    }
-
-    vector<Data> data_set;
-    int label0_cnt = 0;
-    int label1_cnt = 0;
-
-    while ((line = fgets(buffer, sizeof(buffer), fp)) != NULL) {
-
-        if (last_label_exist && label0_cnt >= read_line_num0 && label1_cnt >= read_line_num1) break;
-
-        vector<float> feature(features_num + (last_label_exist? 1: 0), 0.0);
-
-        int f_cnt = 0;
-        record = strtok(line, ",");
-        int flag = 0;
-        while (record != NULL) {
-//            printf("%s ", record);
-            feature[f_cnt++] = atof(record);
-            if (feature[f_cnt - 1] < 0) {
-                flag = 1;
-                break;
-            }
-            record = strtok(NULL, ","); // 每个特征值
-        }
-
-        if (flag) continue;
-
-
-        if (last_label_exist && (label0_cnt < read_line_num0 || label1_cnt < read_line_num1)) {
-            int ftf = (int) feature.back();
-            feature.pop_back();
-            data_set.push_back(Data(feature, ftf));
-
-            if (ftf == 0) {
-                label0_cnt++;
-            } else {
-                label1_cnt++;
-            }
-
-        } else {
-            data_set.emplace_back(Data(feature, 0));
-        }
-//        if (last_label_exist) {
-//            int ftf = (int) feature.back();
-//            feature.pop_back();
-//
-//            if (ftf == 0 && label0_cnt < read_line_num0 ) {
-//                data_set.push_back(Data(feature, ftf));
-//                label0_cnt++;
-//            } else if (ftf == 1 && label1_cnt < read_line_num1) {
-//                data_set.push_back(Data(feature, ftf));
-//                label1_cnt++;
-//            }
-
-//        } else {
-//            data_set.push_back(Data(feature, 0));
-//        }
-    }
-    fclose(fp);
-    fp = NULL;
-
-#ifdef TEST
-    printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
-#endif
-
-    return data_set;
-}
-
 
 inline void LR::StorePredict()
 {
@@ -389,6 +474,9 @@ inline void LR::StorePredict()
     }
     fout.close();
 }
+
+
+
 
 bool loadAnswerData(string awFile, vector<int> & awVec) {
     ifstream infile(awFile.c_str());
