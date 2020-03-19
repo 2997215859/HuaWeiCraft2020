@@ -9,16 +9,29 @@
 
 #include <cfloat>
 #include <cstring>
+#include <future>
+#include <thread>
 
 #ifndef NO_NEON
 #include <arm_neon.h>
 #endif
 
-char buf[1<<22],*p1=buf,*p2=buf;
 
-inline int getc(FILE * fp){
-    return p1==p2&&(p2=(p1=buf)+fread(buf,1,1<<21, fp),p1==p2)?EOF:*p1++;
+
+
+inline int getc(FILE * fp, bool last_label_exist) {
+
+    static char buf[1<<22], *p1=buf, *p2=buf;
+    static char buf1[1<<22], *p3=buf1, *p4=buf1;
+
+    if (last_label_exist) {
+        return p1==p2&&(p2=(p1=buf)+fread(buf,1,1<<21, fp),p1==p2)?EOF:*p1++;
+    } else {
+        return p3==p4&&(p4=(p3=buf1)+fread(buf1,1,1<<21, fp),p3==p4)?EOF:*p3++;
+    }
+
 }
+
 
 using namespace std;
 
@@ -38,29 +51,29 @@ struct Data {
     {}
 };
 
-inline float GetOneFloatData(FILE * fp) {
+inline float GetOneFloatData(FILE * fp, bool last_label_exist) {
 
     int f = 1;
-    char ch = getc(fp);
+    char ch = getc(fp, last_label_exist);
 
     if (ch == char(EOF)) return -2;
 
-    if (ch == '-') {f = -1; ch = getc(fp);}
+    if (ch == '-') {f = -1; ch = getc(fp, last_label_exist);}
 
 
     float ret = ch - '0';
     ret *= 1000;
 
-    getc(fp); // 点号
+    getc(fp, last_label_exist); // 点号
 
-    ch = getc(fp);
+    ch = getc(fp, last_label_exist);
 
     ret += (ch - '0') * 100;
-    ch = getc(fp);
+    ch = getc(fp, last_label_exist);
 
     ret += (ch - '0') * 10;
 
-    ch = getc(fp);
+    ch = getc(fp, last_label_exist);
 
     ret += (ch - '0');
     return ret * f / 1000.0;
@@ -94,18 +107,18 @@ vector<Data> LoadData(const string & filename, bool last_label_exist)
         int eof_flag = 0;
         int neg_flag = 0;
         while (f_cnt < features_num) {
-            float f = GetOneFloatData(fp);
+            float f = GetOneFloatData(fp, last_label_exist);
             if (f == -2) {eof_flag = 1; break;}
             if (f < 0) {neg_flag = 1;}
             feature[f_cnt++] = f;
-            getc(fp);
+            getc(fp, last_label_exist);
         }
 
         if (eof_flag) break;
 
         if (last_label_exist) {
-            feature[f_cnt] =  getc(fp) - '0';
-            getc(fp); // 获取回车键
+            feature[f_cnt] =  getc(fp, last_label_exist) - '0';
+            getc(fp, last_label_exist); // 获取回车键
         }
 
         if (neg_flag) continue;
@@ -135,9 +148,9 @@ vector<Data> LoadData(const string & filename, bool last_label_exist)
     printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
 #endif
 
-    memset(buf, 0, sizeof(buf) / sizeof(char));
-    p1 = buf;
-    p2 = buf;
+//    memset(buf, 0, sizeof(buf) / sizeof(char));
+//    p1 = buf;
+//    p2 = buf;
     return data_set;
 
 //    while ((line = fgets(buffer, sizeof(buffer), fp)) != NULL) {
@@ -200,7 +213,7 @@ class LR {
 public:
     void train();
 
-    void predict();
+    void predict(const vector<Data> & train_data);
 
     LR(const string & train_file, const string & test_file, const string & predict_file);
     float fast_exp(float x);
@@ -327,10 +340,10 @@ void LR::train() {
 
 }
 
-void LR::predict() {
+void LR::predict(const vector<Data> & test_data) {
 
 
-    LoadTestData();
+//    LoadTestData();
 
 #ifdef TEST
     clock_t start_time = clock();
@@ -339,8 +352,8 @@ void LR::predict() {
     float sigVal;
     int predictVal;
 
-    for (int j = 0; j < test_data_.size(); j++) {
-        sigVal = sigmoidCalc(dot(test_data_[j].features, min_error_weight_));
+    for (int j = 0; j < test_data.size(); j++) {
+        sigVal = sigmoidCalc(dot(test_data[j].features, min_error_weight_));
 //        sigVal = sigmoidCalc(dot(test_data_[j].features, weight_));
         predictVal = sigVal >= predictTrueThresh ? 1 : 0;
         predict_vec.push_back(predictVal);
@@ -557,12 +570,19 @@ int main(int argc, char *argv[])
 #endif
 
 
+    packaged_task<vector<Data>(const string & , bool)> test_task(LoadData);
+    future<vector<Data>> test_future = test_task.get_future();
+    thread t1(move(test_task), test_file, false);
+
+
     LR logist(train_file, test_file, predict_file);
 
 
     logist.train();
 
-    logist.predict();
+    vector<Data> test_data = test_future.get();
+
+    logist.predict(test_data);
 
 
 #ifdef TEST
@@ -573,6 +593,8 @@ int main(int argc, char *argv[])
 #ifdef TEST
     Test(answer_file, predict_file);
 #endif
+
+    t1.join();
 
     return 0;
 }
