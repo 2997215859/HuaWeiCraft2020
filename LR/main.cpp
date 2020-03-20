@@ -16,7 +16,7 @@
 #include <arm_neon.h>
 #endif
 
-
+#define IB 4
 
 
 inline int getc(FILE * fp, bool last_label_exist) {
@@ -43,6 +43,33 @@ const int features_num = 1000;
 const int read_line_num0 = 300;
 const int read_line_num1 = 200;
 
+inline float dot (const vector<float> & vec1, const vector<float> & vec2) {
+    float sum = 0.0;
+#ifdef NO_NEON
+
+    for (int i = 0; i < vec1.size(); i++) {
+        sum += vec1[i] * vec2[i];
+    }
+#else
+    int len = vec1.size();
+    const float * p_vec1 = &vec1[0];
+    const float * p_vec2 = &vec2[0];
+
+
+    float32x4_t sum_vec = vdupq_n_f32(0),left_vec,right_vec;
+    for(int i = 0; i < len; i += 4)
+    {
+        left_vec = vld1q_f32(p_vec1 + i);
+        right_vec = vld1q_f32(p_vec2 + i);
+        sum_vec = vmlaq_f32(sum_vec, left_vec, right_vec);
+    }
+
+    float32x2_t r = vadd_f32(vget_high_f32(sum_vec), vget_low_f32(sum_vec));
+    sum += vget_lane_f32(vpadd_f32(r,r),0);
+
+#endif
+    return sum;
+}
 
 struct Data {
     vector<float> features;
@@ -50,6 +77,63 @@ struct Data {
     Data(vector<float> f, int l) : features(f), label(l)
     {}
 };
+
+vector<float> matrix_mul (const vector<Data> & a, const vector<float> & b) {
+
+    int M = a.size();
+    int K = a[0].features.size();
+    int N = 1;
+
+    vector<float> c(K, 0);
+#ifdef NO_NEON
+
+    for (int i = 0; i < M; i++) {
+        c[i] = dot(a[i].features, b);
+    }
+
+#else
+
+    int i = 0;
+    for (i = 0; i + IB < M; i += IB) {
+        float32x4_t temp[IB];
+        for (int ii = 0; ii < IB; ii++) {
+            temp[ii] = vdupq_n_f32(0.0f);
+        }
+
+
+        for (int k = 0; k < K; k += 4) {
+            float32x4_t v_a[IB];
+            for (int ii = 0; ii < IB; ii++) {
+                v_a[ii] = vld1q_f32(&a[i + ii].features[k]);
+            }
+            float32x4_t v_b = vld1q_f32(&b[k]);
+
+            for (int ii = 0; ii < IB; ii++) {
+                temp[ii] = vmlaq_f32(temp[ii], v_a[ii], v_b);
+            }
+
+        }
+
+
+        for (int ii = 0; ii < IB; ii++) {
+            float32x4_t temp_c = temp[ii];
+            c[i + ii] = (temp_c[0] + temp_c[1]) + (temp_c[2] + temp_c[3]);
+        }
+
+
+    }
+
+    while (i < M) {
+        c[i++] = dot(a[i].features, b);
+    }
+
+
+#endif
+
+    return c;
+}
+
+
 
 inline float GetOneFloatData(FILE * fp, bool last_label_exist) {
 
@@ -238,7 +322,6 @@ private:
 
     void initParam();
 
-    float dot (const vector<float> & vec1, const vector<float> & vec2);
 
     float sigmoidCalc(const float wxb);
     float lossCal(const vector<float> & weight);
@@ -280,17 +363,13 @@ void LR::train() {
     clock_t start_time = clock();
 #endif
 
-    float sigmoidVal;
-    float wxbVal;
-
-    vector<float> sigmoidVec(train_data_.size(), 0.0);
-
     for (int i = 0; i < maxIterTimes; i++) {
 
+
+        vector<float> sigmoidVec = matrix_mul(train_data_, weight_);
+
         for (int j = 0; j < train_data_.size(); j++) {
-            wxbVal = dot(train_data_[j].features, weight_);
-            sigmoidVal = sigmoidCalc(wxbVal);
-            sigmoidVec[j] = sigmoidVal;
+            sigmoidVec[j] = sigmoidCalc(sigmoidVec[j]);
         }
 
         float error_rate = 0.0;
@@ -412,39 +491,11 @@ inline void LR::initParam()
 }
 
 
-inline float LR::dot (const vector<float> & vec1, const vector<float> & vec2) {
 
-#ifndef NO_NEON
-    int len = vec1.size();
-    const float * p_vec1 = &vec1[0];
-    const float * p_vec2 = &vec2[0];
-
-
-    float sum=0;
-    float32x4_t sum_vec = vdupq_n_f32(0),left_vec,right_vec;
-    for(int i = 0; i < len; i += 4)
-    {
-        left_vec = vld1q_f32(p_vec1 + i);
-        right_vec = vld1q_f32(p_vec2 + i);
-        sum_vec = vmlaq_f32(sum_vec, left_vec, right_vec);
-    }
-
-    float32x2_t r = vadd_f32(vget_high_f32(sum_vec), vget_low_f32(sum_vec));
-    sum += vget_lane_f32(vpadd_f32(r,r),0);
-#else
-    float sum = 0.0;
-    for (int i = 0; i < vec1.size(); i++) {
-        sum += vec1[i] * vec2[i];
-    }
-#endif
-    return sum;
-}
 
 
 inline float LR::sigmoidCalc(const float wxb) {
-    float expv = exp(-1 * wxb);
-    float expvInv = 1 / (1 + expv);
-    return expvInv;
+    return 1 / (1 + exp(-1 * wxb));
 }
 inline float LR::lossCal(const vector<float> & weight) {
     float lossV = 0.0L;
@@ -559,7 +610,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST // 线下测试用的数据路径
     string train_file = "../data/train_data.txt";
-    string test_file = "../data/test_data.txt";
+    string test_file = "../data/test_data2.txt";
     string predict_file = "../data/result.txt";
     string answer_file = "../data/answer.txt";
 #else // 提交到线上，官方要求的数据路径
