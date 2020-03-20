@@ -432,7 +432,7 @@ Grad LR::Backward (const Cache & cache, const vector<Data> & data, int lambd) {
     int len = cache.a2.size();
 
     vector<float> d_z2(len, 0.0);
-    float d_w2;
+    float d_w2 = 0;
     float d_b2 = 0;
     vector<float> d_z1(len, 0.0);
 
@@ -519,7 +519,10 @@ void LR::Optimize (int batch_size, float learning_rate, int lambd) {
 
             Cache cache = Propagate(batch_samples, true);
 
+
+
             Grad grad = Backward(cache, batch_samples, lambd);
+            
 
             for (int i = 0; i < grad.dw1.size(); i++) {
                 weight1_[i] = weight1_[i] - learning_rate * grad.dw1[i];
@@ -567,10 +570,7 @@ void LR::predict(const vector<Data> & test_data) {
 
 #ifdef TEST
 
-    printf("weight1[0]: %f \n", weight1_[0]);
-    printf("weight2: %f \n", weight2_);
-    printf("b1: %f\n", b1);
-    printf("b2: %f\n", b2);
+
 
     clock_t end_time = clock();
     printf("模型预测时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);

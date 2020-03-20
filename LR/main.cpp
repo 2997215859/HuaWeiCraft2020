@@ -84,7 +84,7 @@ vector<float> matrix_mul (const vector<Data> & a, const vector<float> & b) {
     int K = a[0].features.size();
     int N = 1;
 
-    vector<float> c(K, 0);
+    vector<float> c(M, 0);
 #ifdef NO_NEON
 
     for (int i = 0; i < M; i++) {
