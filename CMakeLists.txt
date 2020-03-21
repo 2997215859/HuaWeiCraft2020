@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 11)
 
 add_definitions(-D TEST )
 add_definitions(-D NO_NEON)
+add_definitions(-D ZCONF)
 
 find_package(Threads REQUIRED)
 
