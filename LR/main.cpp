@@ -207,14 +207,14 @@ vector<Data> LoadData(const string & filename, bool last_label_exist)
 
 
     if (last_label_exist) {
-        len_train_file = lseek(fd, 0, SEEK_END);
-//        len_train_file = 10 * 1024 * 1204;
+//        len_train_file = lseek(fd, 0, SEEK_END);
+        len_train_file = 10 * 1024 * 1204;
         buf = (char *) mmap(NULL, len_train_file, PROT_READ, MAP_PRIVATE, fd, 0);
     } else {
         len_test_file = lseek(fd, 0, SEEK_END);
         buf1 = (char *) mmap(NULL, len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
+        lseek(fd, 0, SEEK_SET);
     }
-    lseek(fd, 0, SEEK_SET);
 
     vector<Data> data_set;
     int label0_cnt = 0;
@@ -346,7 +346,8 @@ private:
     vector<Data> train_data_;
     vector<Data> train_data_t_;
     vector<Data> test_data_;
-    vector<int> predict_vec;
+//    vector<int> predict_vec;
+    vector<char> predict_vec;
 
     vector<float> weight_;
     vector<float> min_error_weight_;
@@ -400,30 +401,34 @@ void LR::train() {
 
     LoadTrainData();
 
+    int train_data_len = train_data_.size();
+
 #ifdef TEST
     clock_t start_time = clock();
 #endif
 
-    vector<float> error_vec(train_data_.size());
+    vector<float> error_vec(train_data_len);
 
     for (int i = 0; i < maxIterTimes; i++) {
 
 
         vector<float> sigmoidVec = matrix_mul(train_data_, weight_);
 
-        for (int j = 0; j < train_data_.size(); j++) {
+//        for (int j = 0; j < train_data_len; j++) {
+//            sigmoidVec[j] = sigmoidCalc(sigmoidVec[j]);
+//        }
+
+
+        for (int j = 0; j < train_data_len; j++) {
             sigmoidVec[j] = sigmoidCalc(sigmoidVec[j]);
-        }
-
-
-        for (int j = 0; j < train_data_.size(); j++) {
             error_vec[j] = train_data_[j].label - sigmoidVec[j];
         }
 
-        float error_rate = 0;
-        for (int i = 0; i < error_vec.size(); i++) {
-            error_rate += error_vec[i] * error_vec[i];
-        }
+        float error_rate = dot(error_vec, error_vec);
+//        float error_rate = 0;
+//        for (int i = 0; i < error_vec.size(); i++) {
+//            error_rate += error_vec[i] * error_vec[i];
+//        }
 
 
         if (error_rate < min_error_rate_) {
@@ -447,9 +452,10 @@ void LR::train() {
 //        for (int j = 0; j < weight_.size(); j++) {
 //            weight_[j] += rate * gradientSlope(train_data_, j, sigmoidVec);
 //        }
+
         vector<float> delta_weight = matrix_mul(train_data_t_, error_vec);
         for (int j = 0; j < weight_.size(); j++) {
-            weight_[j] += rate * gradientSlope(train_data_, j, sigmoidVec);
+            weight_[j] += rate * delta_weight[j] / train_data_len;
         }
 
 #ifdef TEST
@@ -488,7 +494,7 @@ void LR::predict(const vector<Data> & test_data) {
         sigVal = sigmoidCalc(dot(test_data[j].features, min_error_weight_));
 //        sigVal = sigmoidCalc(dot(test_data_[j].features, weight_));
         predictVal = sigVal >= predictTrueThresh ? 1 : 0;
-        predict_vec.emplace_back(predictVal);
+        predict_vec.emplace_back(predictVal + '0');
     }
 
 #ifdef TEST
@@ -579,18 +585,47 @@ inline float LR::gradientSlope(const vector<Data> & dataSet, int index, const ve
 
 inline void LR::StorePredict()
 {
-    string line;
-    int i = 0;
+//    string line;
+//    int i = 0;
+//
+//    ofstream fout(predict_file_.c_str());
+//    if (!fout.is_open()) {
+//        printf("打开预测结果文件失败");
+//        exit(1);
+//    }
+//    for (i = 0; i < predict_vec.size(); i++) {
+//        fout << predict_vec[i] << endl;
+//    }
+//    fout.close();
 
-    ofstream fout(predict_file_.c_str());
-    if (!fout.is_open()) {
-        printf("打开预测结果文件失败");
-        exit(1);
+    const int DATA_LEN = 2 * predict_vec.size();
+    char * pData = new char[DATA_LEN];
+    int j = 0;
+    for (int i = 0; i < predict_vec.size(); i++) {
+        pData[j++] = predict_vec[i];
+        pData[j++] = '\n';
     }
-    for (i = 0; i < predict_vec.size(); i++) {
-        fout << predict_vec[i] << endl;
-    }
-    fout.close();
+    int fd = open(predict_file_.c_str(), O_RDWR | O_CREAT, 0777);
+    lseek(fd, DATA_LEN - 1, SEEK_SET);
+    write(fd, "\0", 1);
+    void* p = mmap(NULL, DATA_LEN, PROT_WRITE, MAP_SHARED, fd, 0);
+
+    close(fd);
+    memcpy(p, pData, DATA_LEN);
+
+//    const int DATA_LEN = 1024*1024*200;
+//    char* pData = new char[DATA_LEN]; //200MB
+//    memset(pData, 'a', DATA_LEN);
+//    int fd = open("../data/mmap.txt", O_RDWR | O_CREAT, 0777);
+//    lseek(fd, DATA_LEN-1, SEEK_SET);
+//    write(fd, "", 1);
+//    void* p = mmap(NULL, DATA_LEN, PROT_WRITE, MAP_SHARED, fd, 0);
+//    close(fd);
+//    fd = -1;
+//    memcpy(p, pData, DATA_LEN);
+
+
+
 }
 
 
