@@ -365,7 +365,7 @@ private:
     void initParam();
 
 
-    float sigmoidCalc(const float wxb);
+    float sigmoidCalc(const float & wxb);
     float lossCal(const vector<float> & weight);
 
     float gradientSlope(const vector<Data> & dataSet, int index, const vector<float> & sigmoidVec);
@@ -554,7 +554,7 @@ inline void LR::initParam()
 
 
 
-inline float LR::sigmoidCalc(const float wxb) {
+inline float LR::sigmoidCalc(const float & wxb) {
     return 1 / (1 + exp(-1 * wxb));
 }
 inline float LR::lossCal(const vector<float> & weight) {
@@ -720,7 +720,16 @@ int main(int argc, char *argv[])
 
     logist.train();
 
+
+#ifdef TEST
+    clock_t wait_start_time = clock();
+#endif
     vector<Data> test_data = test_future.get();
+
+#ifdef TEST
+    clock_t wait_end_time = clock();
+    printf("训练完的耗时（s）: %f \n", (double) (wait_end_time - wait_start_time) / CLOCKS_PER_SEC);
+#endif
 
     logist.predict(test_data);
 
