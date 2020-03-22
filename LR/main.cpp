@@ -31,21 +31,27 @@
 #define IB sizeof(CacheLineSize) / sizeof(float)
 //#define IB 2
 
-static int len_train_file;
-static int len_test_file;
+static int buf_len_train_file;
+static int buf_len_test_file;
+
+
+static int test_sample_num;
 
 static char * buf;
 static char * buf1;
 
+static int len_train_data = 0 ;
+static int len_test_data = 0;
+
 inline int getc(bool last_label_exist) {
 
     if (last_label_exist) {
-        if (len_train_file < 0) return EOF;
-        len_train_file--;
+        if (buf_len_train_file < 0) return EOF;
+        buf_len_train_file--;
         return *buf++;
     } else {
-        if (len_test_file < 0) return EOF;
-        len_test_file--;
+        if (buf_len_test_file < 0) return EOF;
+        buf_len_test_file--;
         return *buf1++;
     }
 }
@@ -199,6 +205,65 @@ inline float GetOneFloatData(bool last_label_exist) {
 }
 
 
+vector<Data> LoadTestData (const string & filename, bool last_label_exist) {
+
+#ifdef TEST
+    clock_t start_time = clock();
+#endif
+
+    int fd = open(filename.c_str(), O_RDONLY);
+
+    buf_len_test_file = lseek(fd, 0, SEEK_END);
+    buf1 = (char *) mmap(NULL, buf_len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
+    lseek(fd, 0, SEEK_SET);
+
+    vector<Data> data_set(30000, Data(1000));
+
+    int label0_cnt = 0;
+    int label1_cnt = 0;
+
+
+    len_test_data = 0;
+
+    while (true) {
+
+        int f_cnt = 0;
+        int eof_flag = 0;
+        int neg_flag = 0;
+        while (f_cnt < features_num) {
+            float f = GetOneFloatData(last_label_exist);
+
+            if (f == -2) {eof_flag = 1; break;}
+            if (f < 0) {neg_flag = 1;}
+            data_set[len_test_data].features[f_cnt++] = f;
+            getc(last_label_exist);
+        }
+
+        if (eof_flag) break;
+        if (neg_flag) continue;
+
+        len_test_data++;
+
+    }
+
+    data_set.resize(len_test_data, Data(0));
+
+    close(fd);
+
+#ifdef TEST
+    clock_t end_time = clock();
+    printf("测试集读取耗时（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
+#endif
+
+
+#ifdef TEST
+    printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
+#endif
+
+    return data_set;
+
+}
+
 
 vector<Data> LoadData(const string & filename, bool last_label_exist)
 {
@@ -208,11 +273,11 @@ vector<Data> LoadData(const string & filename, bool last_label_exist)
 
     if (last_label_exist) {
 //        len_train_file = lseek(fd, 0, SEEK_END);
-        len_train_file = 10 * 1024 * 1204;
-        buf = (char *) mmap(NULL, len_train_file, PROT_READ, MAP_PRIVATE, fd, 0);
+        buf_len_train_file = 10 * 1024 * 1204;
+        buf = (char *) mmap(NULL, buf_len_train_file, PROT_READ, MAP_PRIVATE, fd, 0);
     } else {
-        len_test_file = lseek(fd, 0, SEEK_END);
-        buf1 = (char *) mmap(NULL, len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
+        buf_len_test_file = lseek(fd, 0, SEEK_END);
+        buf1 = (char *) mmap(NULL, buf_len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
         lseek(fd, 0, SEEK_SET);
     }
 
@@ -710,7 +775,7 @@ int main(int argc, char *argv[])
 #endif
 
 
-    packaged_task<vector<Data>(const string & , bool)> test_task(LoadData);
+    packaged_task<vector<Data>(const string & , bool)> test_task(LoadTestData);
     future<vector<Data>> test_future = test_task.get_future();
     thread t1(move(test_task), test_file, false);
 
@@ -728,7 +793,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST
     clock_t wait_end_time = clock();
-    printf("训练完的耗时（s）: %f \n", (double) (wait_end_time - wait_start_time) / CLOCKS_PER_SEC);
+    printf("训练完等待的耗时（s）: %f \n", (double) (wait_end_time - wait_start_time) / CLOCKS_PER_SEC);
 #endif
 
     logist.predict(test_data);
