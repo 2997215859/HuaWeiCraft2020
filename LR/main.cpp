@@ -208,6 +208,7 @@ void SplitFunc (vector<Data> & data_set, char * buf, int line_start, int line_nu
 {
 
     cnt = 0;
+
     while (cnt < line_num) {
 
         int f_cnt = 0;
@@ -240,18 +241,23 @@ vector<Data> LoadTestDataMultiThread (const string & filename) {
 
 
     int cnt1 = 0;
-    thread t1(SplitFunc, ref(data_set), buf1, 0, 7000, ref(cnt1));
+    thread t1(SplitFunc, ref(data_set), buf1, 0, 5000, ref(cnt1));
 
     int cnt2 = 0;
-    thread t2(SplitFunc, ref(data_set), buf1 + 7000 * 6000, 7000, 7000, ref(cnt2));
+    thread t2(SplitFunc, ref(data_set), buf1 + 5000 * 6000, 5000, 5000, ref(cnt2));
+
     int cnt3 = 0;
-    thread t3(SplitFunc, ref(data_set), buf1 + 14000 * 6000, 14000, 7000, ref(cnt3));
+    thread t3(SplitFunc, ref(data_set), buf1 + 10000 * 6000, 10000, 5000, ref(cnt3));
+
+    int cnt4 = 0;
+    thread t4(SplitFunc, ref(data_set), buf1 + 15000 * 6000, 15000, 5000, ref(cnt4));
 
     t1.join();
     t2.join();
     t3.join();
+    t4.join();
 
-    int cnt = cnt1 + cnt2 + cnt3;
+    int cnt = cnt1 + cnt2 + cnt3 + cnt4;
 
 //#ifdef TEST
 //    printf("共计 %d 行: %d + %d + %d \n", cnt, cnt1, cnt2, cnt3);
