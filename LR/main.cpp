@@ -175,6 +175,97 @@ vector<float> matrix_mul (const vector<Data> & a, const vector<float> & b) {
 }
 
 
+inline float GetOneFloatData (char* &  buf) {
+    int f = 1;
+    char ch = *buf++;
+
+//    if (ch == char(EOF)) return -2;
+    if (ch == '\0') return -2;
+
+    if (ch == '-') {f = -1; ch = *buf++;}
+
+
+    float ret = ch - '0';
+    ret *= 1000;
+
+    buf++; // 点号
+
+    ch = *buf++;
+
+    ret += (ch - '0') * 100;
+    ch = *buf++;
+
+    ret += (ch - '0') * 10;
+
+    ch = *buf++;
+
+    ret += (ch - '0');
+
+    return ret * f / 1000.0;
+}
+
+void SplitFunc (vector<Data> & data_set, char * buf, int line_start, int line_num, int & cnt)
+{
+
+    cnt = 0;
+    while (cnt < line_num) {
+
+        int f_cnt = 0;
+        int eof_flag = 0;
+
+        while (f_cnt < features_num) {
+            float f = GetOneFloatData(buf);
+            if (f == -2) {eof_flag = 1; break;}
+            data_set[line_start + cnt].features[f_cnt++] = f;
+            buf++;
+        }
+        if (eof_flag) break;
+        cnt++;
+//        if (*buf == '\0') break;
+    }
+}
+
+
+
+vector<Data> LoadTestDataMultiThread (const string & filename) {
+
+    int fd = open(filename.c_str(), O_RDONLY);
+
+    buf_len_test_file = lseek(fd, 0, SEEK_END);
+    buf1 = (char *) mmap(NULL, buf_len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
+    lseek(fd, 0, SEEK_SET);
+
+
+    vector<Data> data_set(30000, Data(1000));
+
+
+    int cnt1 = 0;
+    thread t1(SplitFunc, ref(data_set), buf1, 0, 7000, ref(cnt1));
+
+    int cnt2 = 0;
+    thread t2(SplitFunc, ref(data_set), buf1 + 7000 * 6000, 7000, 7000, ref(cnt2));
+    int cnt3 = 0;
+    thread t3(SplitFunc, ref(data_set), buf1 + 14000 * 6000, 14000, 7000, ref(cnt3));
+
+    t1.join();
+    t2.join();
+    t3.join();
+
+    int cnt = cnt1 + cnt2 + cnt3;
+
+//#ifdef TEST
+//    printf("共计 %d 行: %d + %d + %d \n", cnt, cnt1, cnt2, cnt3);
+//#endif
+
+
+    close(fd);
+
+    data_set.resize(cnt, Data(1000));
+
+    return data_set;
+
+}
+
 
 inline float GetOneFloatData(bool last_label_exist) {
 
@@ -775,9 +866,9 @@ int main(int argc, char *argv[])
 #endif
 
 
-    packaged_task<vector<Data>(const string & , bool)> test_task(LoadTestData);
-    future<vector<Data>> test_future = test_task.get_future();
-    thread t1(move(test_task), test_file, false);
+//    packaged_task<vector<Data>(const string & , bool)> test_task(LoadTestData);
+//    future<vector<Data>> test_future = test_task.get_future();
+//    thread t1(move(test_task), test_file, false);
 
 
     LR logist(train_file, test_file, predict_file);
@@ -789,7 +880,9 @@ int main(int argc, char *argv[])
 #ifdef TEST
     clock_t wait_start_time = clock();
 #endif
-    vector<Data> test_data = test_future.get();
+//    vector<Data> test_data = test_future.get();
+
+    vector<Data> test_data = LoadTestDataMultiThread(test_file);
 
 #ifdef TEST
     clock_t wait_end_time = clock();
@@ -808,7 +901,7 @@ int main(int argc, char *argv[])
     Test(answer_file, predict_file);
 #endif
 
-    t1.join();
+//    t1.join();
 
     return 0;
 }
