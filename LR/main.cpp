@@ -237,7 +237,7 @@ vector<Data> LoadTestDataMultiThread (const string & filename) {
     lseek(fd, 0, SEEK_SET);
 
 
-    vector<Data> data_set(30000, Data(1000));
+    vector<Data> data_set(20000, Data(1000));
 
 
     int cnt1 = 0;
@@ -266,7 +266,6 @@ vector<Data> LoadTestDataMultiThread (const string & filename) {
 
     close(fd);
 
-    data_set.resize(cnt, Data(1000));
 
     return data_set;
 
