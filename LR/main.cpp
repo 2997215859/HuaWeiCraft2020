@@ -204,10 +204,10 @@ inline float GetOneFloatData (char* &  buf) {
     return ret * f / 1000.0;
 }
 
-void SplitFunc (vector<Data> & data_set, char * buf, int line_start, int line_num, int & cnt)
+void SplitFunc (vector<Data> & data_set, char * buf, int line_start, int line_num)
 {
 
-    cnt = 0;
+    int cnt = 0;
 
     while (cnt < line_num) {
 
@@ -239,25 +239,29 @@ vector<Data> LoadTestDataMultiThread (const string & filename) {
 
     vector<Data> data_set(20000, Data(1000));
 
+    int thread_num = 8;
+    int cnt_per_thread = 20000 / thread_num;
+    vector<thread> thread_vec;
+    for (int i = 0; i < thread_num; i++) {
+        thread_vec.emplace_back(SplitFunc, ref(data_set), buf1 + cnt_per_thread * 6000 * i, i * cnt_per_thread, cnt_per_thread);
+    }
 
-    int cnt1 = 0;
-    thread t1(SplitFunc, ref(data_set), buf1, 0, 5000, ref(cnt1));
+//    int cnt1 = 0;
+//    thread t1(SplitFunc, ref(data_set), buf1, 0, 5000);
+//
+//    int cnt2 = 0;
+//    thread t2(SplitFunc, ref(data_set), buf1 + 5000 * 6000, 5000, 5000);
+//
+//    int cnt3 = 0;
+//    thread t3(SplitFunc, ref(data_set), buf1 + 10000 * 6000, 10000, 5000);
+//
+//    int cnt4 = 0;
+//    thread t4(SplitFunc, ref(data_set), buf1 + 15000 * 6000, 15000, 5000);
 
-    int cnt2 = 0;
-    thread t2(SplitFunc, ref(data_set), buf1 + 5000 * 6000, 5000, 5000, ref(cnt2));
+    for (int i = 0; i < thread_vec.size(); i++) {
+        thread_vec[i].join();
+    }
 
-    int cnt3 = 0;
-    thread t3(SplitFunc, ref(data_set), buf1 + 10000 * 6000, 10000, 5000, ref(cnt3));
-
-    int cnt4 = 0;
-    thread t4(SplitFunc, ref(data_set), buf1 + 15000 * 6000, 15000, 5000, ref(cnt4));
-
-    t1.join();
-    t2.join();
-    t3.join();
-    t4.join();
-
-    int cnt = cnt1 + cnt2 + cnt3 + cnt4;
 
 //#ifdef TEST
 //    printf("共计 %d 行: %d + %d + %d \n", cnt, cnt1, cnt2, cnt3);
