@@ -28,32 +28,22 @@
 #include <unistd.h>
 
 #define CacheLineSize 64
-#define IB sizeof(CacheLineSize) / sizeof(float)
+#define IB CacheLineSize / sizeof(float)
 //#define IB 2
 
 static int buf_len_train_file;
 static int buf_len_test_file;
 
 
-static int test_sample_num;
-
 static char * buf;
-static char * buf1;
 
-static int len_train_data = 0 ;
+
 static int len_test_data = 0;
 
-inline int getc(bool last_label_exist) {
-
-    if (last_label_exist) {
-        if (buf_len_train_file < 0) return EOF;
-        buf_len_train_file--;
-        return *buf++;
-    } else {
-        if (buf_len_test_file < 0) return EOF;
-        buf_len_test_file--;
-        return *buf1++;
-    }
+inline int getc() {
+    if (buf_len_train_file < 0) return EOF;
+    buf_len_train_file--;
+    return *buf++;
 }
 
 
@@ -61,8 +51,6 @@ using namespace std;
 
 const int features_num = 1000;
 
-
-//const int read_line_num = 1000;
 
 const int read_line_num0 = 300;
 const int read_line_num1 = 200;
@@ -95,41 +83,74 @@ inline float dot (const vector<float> & vec1, const vector<float> & vec2) {
     return sum;
 }
 
-struct Data {
-    vector<float> features;
-    int label;
-    Data(vector<float> f, int l) : features(f), label(l)
-    {}
-
-    Data(int len): features(len, 0.0){}
-};
-
-
-vector<Data> matrix_t (const vector<Data> & a) {
+vector<vector<float>> matrix_t (const vector<vector<float>> & a) {
     int M = a.size();
-    int N = a[0].features.size();
+    int N = a[0].size();
 
-    vector<Data> b(N, Data(M));
+    vector<vector<float>> b(N, vector<float>(M));
     for (int i = 0; i < M; i++) {
         for (int j = 0; j < N; j++) {
-            b[j].features[i] = a[i].features[j];
+            b[j][i] = a[i][j];
         }
     }
 
     return b;
 }
 
-vector<float> matrix_mul (const vector<Data> & a, const vector<float> & b) {
+void MatrixMulPart(const vector<vector<float>> & a, const vector<float> & b, vector<float> & c, int start_line, int line_num) {
+
+#ifndef NO_NEON
+    int K = a[0].size();
+
+    int end_line = start_line + line_num;
+    int i = start_line;
+    for (i = start_line; i + IB < end_line; i += IB) {
+        float32x4_t temp[IB];
+        for (int ii = 0; ii < IB; ii++) {
+            temp[ii] = vdupq_n_f32(0.0f);
+        }
+
+
+        for (int k = 0; k < K; k += 4) {
+            float32x4_t v_a[IB];
+            for (int ii = 0; ii < IB; ii++) {
+                v_a[ii] = vld1q_f32(&a[i + ii][k]);
+            }
+            float32x4_t v_b = vld1q_f32(&b[k]);
+
+            for (int ii = 0; ii < IB; ii++) {
+                temp[ii] = vmlaq_f32(temp[ii], v_a[ii], v_b);
+            }
+
+        }
+
+
+        for (int ii = 0; ii < IB; ii++) {
+            float32x4_t temp_c = temp[ii];
+            c[i + ii] = (temp_c[0] + temp_c[1]) + (temp_c[2] + temp_c[3]);
+        }
+
+
+    }
+
+    while (i < end_line) {
+        c[i++] = dot(a[i], b);
+    }
+#endif
+
+}
+
+vector<float> matrix_mul (const vector<vector<float>> & a, const vector<float> & b) {
 
     int M = a.size();
-    int K = a[0].features.size();
+    int K = a[0].size();
     int N = 1;
 
     vector<float> c(M, 0);
 #ifdef NO_NEON
 
     for (int i = 0; i < M; i++) {
-        c[i] = dot(a[i].features, b);
+        c[i] = dot(a[i], b);
     }
 
 #else
@@ -145,7 +166,7 @@ vector<float> matrix_mul (const vector<Data> & a, const vector<float> & b) {
         for (int k = 0; k < K; k += 4) {
             float32x4_t v_a[IB];
             for (int ii = 0; ii < IB; ii++) {
-                v_a[ii] = vld1q_f32(&a[i + ii].features[k]);
+                v_a[ii] = vld1q_f32(&a[i + ii][k]);
             }
             float32x4_t v_b = vld1q_f32(&b[k]);
 
@@ -165,7 +186,7 @@ vector<float> matrix_mul (const vector<Data> & a, const vector<float> & b) {
     }
 
     while (i < M) {
-        c[i++] = dot(a[i].features, b);
+        c[i++] = dot(a[i], b);
     }
 
 
@@ -204,7 +225,7 @@ inline float GetOneFloatData (char* &  buf) {
     return ret * f / 1000.0;
 }
 
-void SplitFunc (vector<Data> & data_set, char * buf, int line_start, int line_num)
+void SplitTestFunc (vector<vector<float>> & data_set, char * buf, int line_start, int line_num)
 {
 
     int cnt = 0;
@@ -217,7 +238,7 @@ void SplitFunc (vector<Data> & data_set, char * buf, int line_start, int line_nu
         while (f_cnt < features_num) {
             float f = GetOneFloatData(buf);
             if (f == -2) {eof_flag = 1; break;}
-            data_set[line_start + cnt].features[f_cnt++] = f;
+            data_set[line_start + cnt][f_cnt++] = f;
             buf++;
         }
         if (eof_flag) break;
@@ -228,46 +249,28 @@ void SplitFunc (vector<Data> & data_set, char * buf, int line_start, int line_nu
 
 
 
-vector<Data> LoadTestDataMultiThread (const string & filename) {
+vector<vector<float>> LoadTestDataMultiThread (const string & filename) {
 
     int fd = open(filename.c_str(), O_RDONLY);
 
     buf_len_test_file;
-    buf1 = (char *) mmap(NULL, 120000000, PROT_READ, MAP_PRIVATE, fd, 0);
+    char * buf1 = (char *) mmap(NULL, 120000000, PROT_READ, MAP_PRIVATE, fd, 0);
 
-    vector<Data> data_set2(20000, Data(1000));
 
-    vector<Data> data_set(20000, Data(1000));
+    vector<vector<float>> data_set(20000, vector<float>(1000));
 
     int thread_num = 8;
     int cnt_per_thread = 20000 / thread_num;
     vector<thread> thread_vec;
     for (int i = 0; i < thread_num; i++) {
-        thread_vec.emplace_back(SplitFunc, ref(data_set), buf1 + cnt_per_thread * 6000 * i, i * cnt_per_thread, cnt_per_thread);
+        thread_vec.emplace_back(SplitTestFunc, ref(data_set), buf1 + cnt_per_thread * 6000 * i, i * cnt_per_thread, cnt_per_thread);
     }
-
-//    int cnt1 = 0;
-//    thread t1(SplitFunc, ref(data_set), buf1, 0, 5000);
-//
-//    int cnt2 = 0;
-//    thread t2(SplitFunc, ref(data_set), buf1 + 5000 * 6000, 5000, 5000);
-//
-//    int cnt3 = 0;
-//    thread t3(SplitFunc, ref(data_set), buf1 + 10000 * 6000, 10000, 5000);
-//
-//    int cnt4 = 0;
-//    thread t4(SplitFunc, ref(data_set), buf1 + 15000 * 6000, 15000, 5000);
 
     for (int i = 0; i < thread_vec.size(); i++) {
         thread_vec[i].join();
     }
 
 
-//#ifdef TEST
-//    printf("共计 %d 行: %d + %d + %d \n", cnt, cnt1, cnt2, cnt3);
-//#endif
-
-
     close(fd);
 
 
@@ -276,242 +279,53 @@ vector<Data> LoadTestDataMultiThread (const string & filename) {
 }
 
 
-inline float GetOneFloatData(bool last_label_exist) {
+inline float GetOneFloatData() {
 
     int f = 1;
-    char ch = getc(last_label_exist);
+    char ch = getc();
 
     if (ch == char(EOF)) return -2;
 
-    if (ch == '-') {f = -1; ch = getc(last_label_exist);}
+    if (ch == '-') {f = -1; ch = getc();}
 
 
     float ret = ch - '0';
     ret *= 1000;
 
-    getc(last_label_exist); // 点号
+    getc(); // 点号
 
-    ch = getc(last_label_exist);
+    ch = getc();
 
     ret += (ch - '0') * 100;
-    ch = getc(last_label_exist);
+    ch = getc();
 
     ret += (ch - '0') * 10;
 
-    ch = getc(last_label_exist);
+    ch = getc();
 
     ret += (ch - '0');
     return ret * f / 1000.0;
 }
 
 
-vector<Data> LoadTestData (const string & filename, bool last_label_exist) {
-
-#ifdef TEST
-    clock_t start_time = clock();
-#endif
-
-    int fd = open(filename.c_str(), O_RDONLY);
-
-    buf_len_test_file = lseek(fd, 0, SEEK_END);
-    buf1 = (char *) mmap(NULL, buf_len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
-    lseek(fd, 0, SEEK_SET);
-
-    vector<Data> data_set(30000, Data(1000));
-
-    int label0_cnt = 0;
-    int label1_cnt = 0;
-
-
-    len_test_data = 0;
-
-    while (true) {
-
-        int f_cnt = 0;
-        int eof_flag = 0;
-        int neg_flag = 0;
-        while (f_cnt < features_num) {
-            float f = GetOneFloatData(last_label_exist);
-
-            if (f == -2) {eof_flag = 1; break;}
-            if (f < 0) {neg_flag = 1;}
-            data_set[len_test_data].features[f_cnt++] = f;
-            getc(last_label_exist);
-        }
-
-        if (eof_flag) break;
-        if (neg_flag) continue;
-
-        len_test_data++;
-
-    }
-
-    data_set.resize(len_test_data, Data(0));
-
-    close(fd);
-
-#ifdef TEST
-    clock_t end_time = clock();
-    printf("测试集读取耗时（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
-#endif
-
-
-#ifdef TEST
-    printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
-#endif
-
-    return data_set;
-
-}
-
-
-vector<Data> LoadData(const string & filename, bool last_label_exist)
-{
-
-    int fd = open(filename.c_str(), O_RDONLY);
-
-
-    if (last_label_exist) {
-//        len_train_file = lseek(fd, 0, SEEK_END);
-        buf_len_train_file = 10 * 1024 * 1204;
-        buf = (char *) mmap(NULL, buf_len_train_file, PROT_READ, MAP_PRIVATE, fd, 0);
-    } else {
-        buf_len_test_file = lseek(fd, 0, SEEK_END);
-        buf1 = (char *) mmap(NULL, buf_len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
-        lseek(fd, 0, SEEK_SET);
-    }
-
-    vector<Data> data_set;
-    int label0_cnt = 0;
-    int label1_cnt = 0;
-
-    vector<float> feature(features_num + (last_label_exist? 1: 0), 0.0);
-
-    while (true) {
-
-        if (last_label_exist && label0_cnt >= read_line_num0 && label1_cnt >= read_line_num1) break;
-
-        int f_cnt = 0;
-        int eof_flag = 0;
-        int neg_flag = 0;
-        while (f_cnt < features_num) {
-            float f = GetOneFloatData(last_label_exist);
-
-            if (f == -2) {eof_flag = 1; break;}
-            if (f < 0) {neg_flag = 1;}
-            feature[f_cnt++] = f;
-            getc(last_label_exist);
-        }
-
-        if (eof_flag) break;
-
-        if (last_label_exist) {
-            feature[f_cnt] =  getc(last_label_exist) - '0';
-            getc(last_label_exist); // 获取回车键
-        }
-
-        if (neg_flag) continue;
-
-
-        if (last_label_exist && (label0_cnt < read_line_num0 || label1_cnt < read_line_num1)) {
-            int ftf = (int) feature.back();
-            feature.pop_back();
-            data_set.emplace_back(Data(feature, ftf));
-            feature.push_back(ftf);
-
-            if (ftf == 0) {
-                label0_cnt++;
-            } else {
-                label1_cnt++;
-            }
-
-        } else {
-            data_set.emplace_back(Data(feature, 0));
-        }
-
-    }
-
-    close(fd);
-
-#ifdef TEST
-    printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
-#endif
-
-//    memset(buf, 0, sizeof(buf) / sizeof(char));
-//    p1 = buf;
-//    p2 = buf;
-    return data_set;
-
-//    while ((line = fgets(buffer, sizeof(buffer), fp)) != NULL) {
-//
-//        if (last_label_exist && label0_cnt >= read_line_num0 && label1_cnt >= read_line_num1) break;
-//
-//        vector<float> feature(features_num + (last_label_exist? 1: 0), 0.0);
-//
-//        int f_cnt = 0;
-//        record = strtok(line, ",");
-//        int flag = 0;
-//        while (record != NULL) {
-////            printf("%s ", record);
-//            feature[f_cnt++] = atof(record);
-//            if (feature[f_cnt - 1] < 0) {
-//                flag = 1;
-//                break;
-//            }
-//            record = strtok(NULL, ","); // 每个特征值
-//        }
-//
-//        if (flag) continue;
-//
-//
-//        if (last_label_exist && (label0_cnt < read_line_num0 || label1_cnt < read_line_num1)) {
-//            int ftf = (int) feature.back();
-//            feature.pop_back();
-//            data_set.push_back(Data(feature, ftf));
-//
-//            if (ftf == 0) {
-//                label0_cnt++;
-//            } else {
-//                label1_cnt++;
-//            }
-//
-//        } else {
-//            data_set.emplace_back(Data(feature, 0));
-//        }
-////        if (last_label_exist) {
-////            int ftf = (int) feature.back();
-////            feature.pop_back();
-////
-////            if (ftf == 0 && label0_cnt < read_line_num0 ) {
-////                data_set.push_back(Data(feature, ftf));
-////                label0_cnt++;
-////            } else if (ftf == 1 && label1_cnt < read_line_num1) {
-////                data_set.push_back(Data(feature, ftf));
-////                label1_cnt++;
-////            }
-//
-////        } else {
-////            data_set.push_back(Data(feature, 0));
-////        }
-//    }
-
-}
 
 
 class LR {
 public:
     void train();
 
-    void predict(const vector<Data> & train_data);
+    void predict(const vector<vector<float>> & train_data);
 
     LR(const string & train_file, const string & test_file, const string & predict_file);
     float fast_exp(float x);
 
 private:
-    vector<Data> train_data_;
-    vector<Data> train_data_t_;
-    vector<Data> test_data_;
-//    vector<int> predict_vec;
+
+    vector<vector<float>> train_features_; // 训练数据<特征>
+    vector<int> train_labels_; // 训练数据<标签>
+    vector<vector<float>> train_features_t_; // 训练数据的转置
+    vector<vector<float>> test_data_;
+
     vector<char> predict_vec;
 
     vector<float> weight_;
@@ -519,21 +333,16 @@ private:
     float min_error_rate_;
     int min_error_iter_no_;
 
-    string weightParamFile = "modelweight.txt";
 
 private:
-//    vector<Data> LoadData(const string & filename, bool last_label_exist);
-    void LoadTrainData();
+    void LoadTrainData(const string & filename);
 
-    void LoadTestData();
 
     void initParam();
 
 
     float sigmoidCalc(const float & wxb);
-    float lossCal(const vector<float> & weight);
 
-    float gradientSlope(const vector<Data> & dataSet, int index, const vector<float> & sigmoidVec);
     void StorePredict();
 
 private:
@@ -561,12 +370,81 @@ inline float LR::fast_exp(float x) {
     return v.f;
 }
 
+void LR::LoadTrainData(const string & filename)
+{
+
+#ifdef TEST
+    clock_t start_time = clock();
+#endif
+
+    int fd = open(filename.c_str(), O_RDONLY);
+
+
+    buf_len_train_file = 10 * 1024 * 1204;
+    buf = (char *) mmap(NULL, buf_len_train_file, PROT_READ, MAP_PRIVATE, fd, 0);
+
+
+    int label0_cnt = 0;
+    int label1_cnt = 0;
+
+
+    vector<float> feature(features_num, 0.0);
+
+    while (true) {
+
+        if (label0_cnt >= read_line_num0 && label1_cnt >= read_line_num1) break;
+
+        int f_cnt = 0;
+        int eof_flag = 0;
+        int neg_flag = 0;
+        while (f_cnt < features_num) {
+            float f = GetOneFloatData();
+
+            if (f == -2) {eof_flag = 1; break;}
+            if (f < 0) {neg_flag = 1;}
+            feature[f_cnt++] = f;
+            getc();
+        }
+
+        if (eof_flag) break;
+
+        int ftf =  getc() - '0';
+        getc(); // 获取回车键
+
+        if (neg_flag) continue;
+
+
+        if ((label0_cnt < read_line_num0 || label1_cnt < read_line_num1)) {
+            train_features_.emplace_back(feature);
+            train_labels_.emplace_back(ftf);
+            if (ftf == 0) {
+                label0_cnt++;
+            } else {
+                label1_cnt++;
+            }
+
+        }
+
+    }
+
+    close(fd);
+
+    train_features_t_ = matrix_t(train_features_);
+
+#ifdef TEST
+    clock_t end_time = clock();
+    printf("训练集读取时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
+    printf("0 数量: %d, 1 数量: %d \n", label0_cnt, label1_cnt);
+#endif
+
+}
+
 
 void LR::train() {
 
-    LoadTrainData();
+    LoadTrainData(train_file_);
 
-    int train_data_len = train_data_.size();
+    int train_data_len = train_features_.size();
 
 #ifdef TEST
     clock_t start_time = clock();
@@ -574,10 +452,13 @@ void LR::train() {
 
     vector<float> error_vec(train_data_len);
 
+    int thread_num = 2;
+    int cnt_per_thread =  features_num / thread_num;
+
     for (int i = 0; i < maxIterTimes; i++) {
 
 
-        vector<float> sigmoidVec = matrix_mul(train_data_, weight_);
+        vector<float> sigmoidVec = matrix_mul(train_features_, weight_);
 
 //        for (int j = 0; j < train_data_len; j++) {
 //            sigmoidVec[j] = sigmoidCalc(sigmoidVec[j]);
@@ -586,7 +467,7 @@ void LR::train() {
 
         for (int j = 0; j < train_data_len; j++) {
             sigmoidVec[j] = sigmoidCalc(sigmoidVec[j]);
-            error_vec[j] = train_data_[j].label - sigmoidVec[j];
+            error_vec[j] = train_labels_[j] - sigmoidVec[j];
         }
 
         float error_rate = dot(error_vec, error_vec);
@@ -618,7 +499,18 @@ void LR::train() {
 //            weight_[j] += rate * gradientSlope(train_data_, j, sigmoidVec);
 //        }
 
-        vector<float> delta_weight = matrix_mul(train_data_t_, error_vec);
+        vector<float> delta_weight = matrix_mul(train_features_t_, error_vec);
+//        vector<float> delta_weight(features_num);
+//        vector<thread> thread_vec;
+//        for (int j = 0; j < thread_num; j++) {
+//            thread_vec.emplace_back(MatrixMulPart, train_features_t_, error_vec, ref(delta_weight), j * cnt_per_thread, cnt_per_thread);
+//        }
+//
+//        for (int i = 0; i < thread_vec.size(); i++) {
+//            thread_vec[i].join();
+//        }
+
+
         for (int j = 0; j < weight_.size(); j++) {
             weight_[j] += rate * delta_weight[j] / train_data_len;
         }
@@ -643,7 +535,7 @@ void LR::train() {
 
 }
 
-void LR::predict(const vector<Data> & test_data) {
+void LR::predict(const vector<vector<float>> & test_data) {
 
 
 //    LoadTestData();
@@ -656,7 +548,7 @@ void LR::predict(const vector<Data> & test_data) {
     int predictVal;
 
     for (int j = 0; j < test_data.size(); j++) {
-        sigVal = sigmoidCalc(dot(test_data[j].features, min_error_weight_));
+        sigVal = sigmoidCalc(dot(test_data[j], min_error_weight_));
 //        sigVal = sigmoidCalc(dot(test_data_[j].features, weight_));
         predictVal = sigVal >= predictTrueThresh ? 1 : 0;
         predict_vec.emplace_back(predictVal + '0');
@@ -686,28 +578,6 @@ LR::LR(const string & train_file, const string & test_file, const string & predi
 }
 
 
-inline void LR::LoadTrainData() {
-#ifdef TEST
-    clock_t start_time = clock();
-#endif
-    train_data_ = LoadData(train_file_, true);
-    train_data_t_ = matrix_t(train_data_);
-#ifdef TEST
-    clock_t end_time = clock();
-    printf("训练集读取时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
-#endif
-}
-
-inline void LR::LoadTestData() {
-#ifdef TEST
-    clock_t start_time = clock();
-#endif
-    test_data_ = LoadData(test_file_, false);
-#ifdef TEST
-    clock_t end_time = clock();
-    printf("测试集读取时间（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
-#endif
-}
 
 inline void LR::initParam()
 {
@@ -716,52 +586,14 @@ inline void LR::initParam()
 }
 
 
-
-
-
 inline float LR::sigmoidCalc(const float & wxb) {
     return 1 / (1 + exp(-1 * wxb));
 }
-inline float LR::lossCal(const vector<float> & weight) {
-    float lossV = 0.0L;
-    int i;
-
-    for (i = 0; i < train_data_.size(); i++) {
-        lossV -= train_data_[i].label * log(sigmoidCalc(dot(train_data_[i].features, weight)));
-        lossV -= (1 - train_data_[i].label) * log(1 - sigmoidCalc(dot(train_data_[i].features, weight)));
-    }
-    lossV /= train_data_.size();
-    return lossV;
-}
-
-inline float LR::gradientSlope(const vector<Data> & dataSet, int index, const vector<float> & sigmoidVec) {
-    float gsV = 0.0L;
-    float sigv, label;
-    for (int i = 0; i < dataSet.size(); i++) {
-        sigv = sigmoidVec[i];
-        label = dataSet[i].label;
-        gsV += (label - sigv) * (dataSet[i].features[index]);
-    }
-
-    gsV = gsV / dataSet.size();
-    return gsV;
-}
 
 
-inline void LR::StorePredict()
+
+void LR::StorePredict()
 {
-//    string line;
-//    int i = 0;
-//
-//    ofstream fout(predict_file_.c_str());
-//    if (!fout.is_open()) {
-//        printf("打开预测结果文件失败");
-//        exit(1);
-//    }
-//    for (i = 0; i < predict_vec.size(); i++) {
-//        fout << predict_vec[i] << endl;
-//    }
-//    fout.close();
 
     const int DATA_LEN = 2 * predict_vec.size();
     char * pData = new char[DATA_LEN];
@@ -777,19 +609,6 @@ inline void LR::StorePredict()
 
     close(fd);
     memcpy(p, pData, DATA_LEN);
-
-//    const int DATA_LEN = 1024*1024*200;
-//    char* pData = new char[DATA_LEN]; //200MB
-//    memset(pData, 'a', DATA_LEN);
-//    int fd = open("../data/mmap.txt", O_RDWR | O_CREAT, 0777);
-//    lseek(fd, DATA_LEN-1, SEEK_SET);
-//    write(fd, "", 1);
-//    void* p = mmap(NULL, DATA_LEN, PROT_WRITE, MAP_SHARED, fd, 0);
-//    close(fd);
-//    fd = -1;
-//    memcpy(p, pData, DATA_LEN);
-
-
 
 }
 
@@ -891,7 +710,7 @@ int main(int argc, char *argv[])
 #endif
 //    vector<Data> test_data = test_future.get();
 
-    vector<Data> test_data = LoadTestDataMultiThread(test_file);
+    vector<vector<float>> test_data = LoadTestDataMultiThread(test_file);
 
 #ifdef TEST
     clock_t wait_end_time = clock();
