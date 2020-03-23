@@ -232,10 +232,10 @@ vector<Data> LoadTestDataMultiThread (const string & filename) {
 
     int fd = open(filename.c_str(), O_RDONLY);
 
-    buf_len_test_file = lseek(fd, 0, SEEK_END);
-    buf1 = (char *) mmap(NULL, buf_len_test_file, PROT_READ, MAP_PRIVATE, fd, 0);
-    lseek(fd, 0, SEEK_SET);
+    buf_len_test_file;
+    buf1 = (char *) mmap(NULL, 120000000, PROT_READ, MAP_PRIVATE, fd, 0);
 
+    vector<Data> data_set2(20000, Data(1000));
 
     vector<Data> data_set(20000, Data(1000));
 
