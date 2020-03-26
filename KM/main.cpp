@@ -26,12 +26,15 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <unordered_map>
 
 #define CacheLineSize 64
 #define IB CacheLineSize / sizeof(float)
 //#define IB 2
 
 using namespace std;
+
+
 
 int features_num = 1000;
 
@@ -161,36 +164,45 @@ inline float GetOneFloatData() {
 }
 
 
+unordered_map<char, float> m0 = {{'0', 0}, {'1', 1}};
+unordered_map<char, float> m1 = {{'0', 0}, {'1', 0.1}, {'2', 0.2}, {'3', 0.3}, {'4', 0.4}, {'5', 0.5}, {'6', 0.6}, {'7', 0.7}, {'8', 0.8}, {'9', 0.9}};
+unordered_map<char, float> m2 = {{'0', 0}, {'1', 0.01}, {'2', 0.02}, {'3', 0.03}, {'4', 0.04}, {'5', 0.05}, {'6', 0.06}, {'7', 0.07}, {'8', 0.08}, {'9', 0.09}};
+unordered_map<char, float> m3 = {{'0', 0}, {'1', 0.001}, {'2', 0.002}, {'3', 0.003}, {'4', 0.004}, {'5', 0.005}, {'6', 0.006}, {'7', 0.007}, {'8', 0.008}, {'9', 0.009}};
 
 
 
-inline float GetOneFloatData (char* &  buf) {
-    int f = 1;
-    char ch = *buf++;
+float GetOneFloatData (char* &  buf) {
 
-//    if (ch == char(EOF)) return -2;
-    if (ch == '\0') return -2;
+    float ret = m0[*buf] + m1[*(buf + 2)] + m2[*(buf + 3)] + m3[*(buf + 4)];
 
-    if (ch == '-') {f = -1; ch = *buf++;}
+    buf += 5;
+
+    return ret;
 
 
-    float ret = ch - '0';
-    ret *= 1000;
+//    char ch = *buf++;
 
-    buf++; // 点号
 
-    ch = *buf++;
-
-    ret += (ch - '0') * 100;
-    ch = *buf++;
-
-    ret += (ch - '0') * 10;
-
-    ch = *buf++;
-
-    ret += (ch - '0');
-
-    return ret * f / 1000.0;
+////    if (ch == char(EOF)) return -2;
+//    if (ch == '\0') return -2;
+//
+//    float ret = ch - '0';
+//    ret *= 1000;
+//
+//    buf++; // 点号
+//
+//    ch = *buf++;
+//
+//    ret += (ch - '0') * 100;
+//    ch = *buf++;
+//
+//    ret += (ch - '0') * 10;
+//
+//    ch = *buf++;
+//
+//    ret += (ch - '0');
+//
+//    return ret / 1000.0;
 }
 
 void SplitTestFunc (vector<vector<float>> & data_set, char * buf, int line_start, int line_num)
@@ -204,12 +216,15 @@ void SplitTestFunc (vector<vector<float>> & data_set, char * buf, int line_start
         int eof_flag = 0;
 
         while (f_cnt < features_num) {
-            float f = GetOneFloatData(buf);
-            if (f == -2) {eof_flag = 1; break;}
-            data_set[line_start + cnt][f_cnt++] = f;
-            buf++;
+//            float f = GetOneFloatData(buf);
+//            float f = m0[*buf] + m1[*(buf + 2)] + m2[*(buf + 3)] + m3[*(buf + 4)];
+//              float f = (*buf - '0') + (*(buf + 2) - '0') / 10.0 + (*(buf + 3) - '0') / 100.0 + (*(buf + 4) - '0') / 1000.0;
+//              float f = ;
+//            if (f == -2) {eof_flag = 1; break;}
+            data_set[line_start + cnt][f_cnt++] = (1000 * (*buf - '0') + 100 * (*(buf + 2) - '0') + 10 * (*(buf + 3) - '0') + (*(buf + 4) - '0'))  / 1000.0;
+            buf = buf + 6;
         }
-        if (eof_flag) break;
+//        if (eof_flag) break;
         cnt++;
 //        if (*buf == '\0') break;
     }
@@ -257,6 +272,45 @@ void LoadTrainData (const string & filename) {
 
 }
 
+void LoadTestDataMultiThreadByFstream (const string & filename) {
+
+    ios::sync_with_stdio(false);
+    cin.tie(0);
+
+#ifdef TEST
+    clock_t start_time = clock();
+#endif
+
+    ifstream infile(filename.c_str());
+    string line;
+
+    int cnt = 0;
+    while (infile) {
+        getline(infile, line);
+        if (line.empty()) break;
+
+        stringstream sin(line);
+        char ch;
+        double dataV;
+
+
+        int f_cnt = 0;
+        while (sin) {
+//            char c = sin.peek();
+            sin >> dataV;
+            test_features[cnt][f_cnt++] = dataV;
+            sin >> ch;
+        }
+
+        cnt++;
+    }
+    infile.close();
+#ifdef TEST
+    clock_t end_time = clock();
+    printf("测试集读取耗时（s）: %f \n", (double) (end_time - start_time) / CLOCKS_PER_SEC);
+#endif
+}
+
 
 
 void LoadTestDataMultiThread (const string & filename) {
@@ -268,7 +322,6 @@ void LoadTestDataMultiThread (const string & filename) {
     int fd = open(filename.c_str(), O_RDONLY);
 
     char * buf1 = (char *) mmap(NULL, 120000000, PROT_READ, MAP_PRIVATE, fd, 0);
-
 
 
 
@@ -384,6 +437,7 @@ void Predict (const string & predict_file) {
 
 
 bool loadAnswerData(string awFile, vector<int> & awVec) {
+
     ifstream infile(awFile.c_str());
     if (!infile) {
         cout << "打开答案文件失败" << endl;
@@ -441,7 +495,12 @@ void Test (string answerFile, string predictFile) {
 }
 
 
+
 int main (int argc, char *argv[]) {
+
+    ios::sync_with_stdio(false);
+    cin.tie(0);
+
 #ifdef TEST
     clock_t start_time = clock() ;
 #endif
@@ -462,7 +521,7 @@ int main (int argc, char *argv[]) {
 
     LoadTrainData(train_file);
 
-    LoadTestDataMultiThread(test_file);
+    LoadTestDataMultiThread (test_file);
 
     Predict(predict_file);
 
