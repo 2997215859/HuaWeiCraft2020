@@ -139,7 +139,7 @@ void CalcTrainSum (char * buf, int start_line, int line_num, vector<float> & sum
 
             buf -= 1; // 跳过逗号的位置
 
-            float ret = (1000 * (*(buf - 4) - '0') + 100 * (*(buf - 2) - '0') + 10 * (*(buf - 1) - '0') + (*buf - '0'))  / 1000.0;
+            float ret = (1000 * (*(buf - 4) - '0') + 100 * (*(buf - 2) - '0'))  / 1000.0;
 
             buf -= 5; // 跳过浮点数的部分，来到逗号或者符号位的位置。如果是该行第一个数，则会来到上一行的换行符位置
             if (*buf == '-') {ret = -ret;buf--;} // 负数需要取反，并多移动一位
@@ -229,22 +229,88 @@ void Train (const string & filename) {
 
 void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
 
+#ifdef NO_NEON
     int end_line = start_line + line_num;
+    buf = buf + start_line * 6000;
     for (int i = start_line; i < end_line; i++) {
         float norm0 = 0.0;
         float norm1 = 0.0;
-        char * start_buf = buf + i * 6000;
         for (int j = 0; j < features_num; j++) {
-            float ret = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0') + 10 * (*(start_buf + 3) - '0') + (*(start_buf + 4) - '0');
+            float ret = 1000 * (*buf - '0') + 100 * (*(buf + 2) - '0');
             float t1 = ret - label0_means[j];
             float t2 = ret - label1_means[j];
             norm0 += t1 * t1;
             norm1 += t2 * t2;
-            start_buf += 6;
+            buf += 6;
         }
         res[i] = norm0 < norm1? 0: 1;
     }
+#else
 
+    int N = features_num;
+    int i = 0;
+    int end_line = start_line + line_num;
+
+
+    for (i = start_line; i + IB < end_line; i += IB) {
+        float32x4_t temp[IB];
+        float32x4_t temp1[IB];
+        for (int ii = 0; ii < IB; ii++) {
+            temp[ii] = vdupq_n_f32(0.0f);
+            temp1[ii] = vdupq_n_f32(0.0f);
+        }
+
+
+        for (int k = 0; k < N; k += 4) {
+
+            float32x4_t v_b = vld1q_f32(&label0_means[k]);
+            float32x4_t v_b1 = vld1q_f32(&label1_means[k]);
+
+            float32x4_t v_a[IB];
+            float32x4_t v_a1[IB];
+            for (int ii = 0; ii < IB; ii++) {
+                char * start_buf = buf + (i + ii) * 6000 + k * 6;
+
+                float ret[4] = {0.0};
+                ret[0] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+                start_buf += 6;
+                ret[1] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+                start_buf += 6;
+                ret[2] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+                start_buf += 6;
+                ret[3] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+
+                v_a[ii] = vld1q_f32(ret);
+                v_a[ii] = vsubq_f32(v_a[ii], v_b);
+
+                v_a1[ii] = vld1q_f32(ret);
+                v_a1[ii] = vsubq_f32(v_a1[ii], v_b1);
+
+            }
+
+            for (int ii = 0; ii < IB; ii++) {
+                temp[ii] = vmlaq_f32(temp[ii], v_a[ii], v_a[ii]);
+                temp1[ii] = vmlaq_f32(temp1[ii], v_a1[ii], v_a1[ii]);
+            }
+
+        }
+
+
+        for (int ii = 0; ii < IB; ii++) {
+            float32x4_t temp_c = temp[ii];
+            float32x4_t temp_c1 = temp1[ii];
+            float tmp0 = temp_c[0] + temp_c[1] + temp_c[2] + temp_c[3];
+            float tmp1 = temp_c1[0] + temp_c1[1] + temp_c1[2] + temp_c1[3];
+            res[i + ii] = (tmp0 < tmp1? 0: 1);
+
+        }
+
+
+    }
+
+
+
+#endif
 }
 
 
