@@ -30,7 +30,7 @@
 
 //#define CacheLineSize 64
 //#define IB CacheLineSize / sizeof(float)
-#define IB 2
+#define IB 4
 
 using namespace std;
 
@@ -139,7 +139,7 @@ void CalcTrainSum (char * buf, int start_line, int line_num, vector<float> & sum
 
             buf -= 1; // 跳过逗号的位置
 
-            float ret = (1000 * (*(buf - 4) - '0') + 100 * (*(buf - 2) - '0'))  / 1000.0;
+            float ret = (1000 * (*(buf - 4) - '0') + 100 * (*(buf - 2) - '0'));
 
             buf -= 5; // 跳过浮点数的部分，来到逗号或者符号位的位置。如果是该行第一个数，则会来到上一行的换行符位置
             if (*buf == '-') {ret = -ret;buf--;} // 负数需要取反，并多移动一位
@@ -214,8 +214,8 @@ void Train (const string & filename) {
     int cnt_label0 = cnt_label0_part0 + cnt_label0_part1 + cnt_label0_part2 + cnt_label0_part3;
     int cnt_label1 = cnt_label1_part0 + cnt_label1_part1 + cnt_label1_part2 + cnt_label1_part3;
     for (int i = 0; i < features_num; i++) {
-        label0_means[i] = 1000.0 * (sum_label0_part0[i] + sum_label0_part1[i] + sum_label0_part2[i] + sum_label0_part3[i]) / static_cast<float>(cnt_label0);
-        label1_means[i] = 1000.0 * (sum_label1_part0[i] + sum_label1_part1[i] + sum_label1_part2[i] + sum_label1_part3[i]) / static_cast<float>(cnt_label1);
+        label0_means[i] =  (sum_label0_part0[i] + sum_label0_part1[i] + sum_label0_part2[i] + sum_label0_part3[i]) / static_cast<float>(cnt_label0);
+        label1_means[i] = (sum_label1_part0[i] + sum_label1_part1[i] + sum_label1_part2[i] + sum_label1_part3[i]) / static_cast<float>(cnt_label1);
     }
 
 #ifdef TEST
