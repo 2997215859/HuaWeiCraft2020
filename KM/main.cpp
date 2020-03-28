@@ -214,8 +214,8 @@ void Train (const string & filename) {
     int cnt_label0 = cnt_label0_part0 + cnt_label0_part1 + cnt_label0_part2 + cnt_label0_part3;
     int cnt_label1 = cnt_label1_part0 + cnt_label1_part1 + cnt_label1_part2 + cnt_label1_part3;
     for (int i = 0; i < features_num; i++) {
-        label0_means[i] = (sum_label0_part0[i] + sum_label0_part1[i] + sum_label0_part2[i] + sum_label0_part3[i]) / cnt_label0;
-        label1_means[i] = (sum_label1_part0[i] + sum_label1_part1[i] + sum_label1_part2[i] + sum_label1_part3[i]) / cnt_label1;
+        label0_means[i] = 1000.0 * (sum_label0_part0[i] + sum_label0_part1[i] + sum_label0_part2[i] + sum_label0_part3[i]) / static_cast<float>(cnt_label0);
+        label1_means[i] = 1000.0 * (sum_label1_part0[i] + sum_label1_part1[i] + sum_label1_part2[i] + sum_label1_part3[i]) / static_cast<float>(cnt_label1);
     }
 
 #ifdef TEST
@@ -228,14 +228,14 @@ void Train (const string & filename) {
 
 
 void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
-#ifdef NO_NEON
+
     int end_line = start_line + line_num;
     for (int i = start_line; i < end_line; i++) {
         float norm0 = 0.0;
         float norm1 = 0.0;
         char * start_buf = buf + i * 6000;
         for (int j = 0; j < features_num; j++) {
-            float ret = (1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0') + 10 * (*(start_buf + 3) - '0') + (*(start_buf + 4) - '0'))  / 1000.0;
+            float ret = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0') + 10 * (*(start_buf + 3) - '0') + (*(start_buf + 4) - '0');
             float t1 = ret - label0_means[j];
             float t2 = ret - label1_means[j];
             norm0 += t1 * t1;
@@ -244,79 +244,7 @@ void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
         }
         res[i] = norm0 < norm1? 0: 1;
     }
-#else
 
-    int N = features_num;
-    int i = 0;
-    int end_line = start_line + line_num;
-
-
-    for (i = start_line; i + IB < end_line; i += IB) {
-        float32x4_t temp[IB];
-        float32x4_t temp1[IB];
-        for (int ii = 0; ii < IB; ii++) {
-            temp[ii] = vdupq_n_f32(0.0f);
-            temp1[ii] = vdupq_n_f32(0.0f);
-        }
-
-
-        for (int k = 0; k < N; k += 4) {
-
-            float32x4_t v_b = vld1q_f32(&label0_means[k]);
-            float32x4_t v_b1 = vld1q_f32(&label1_means[k]);
-
-            float32x4_t v_a[IB];
-            float32x4_t v_a1[IB];
-            for (int ii = 0; ii < IB; ii++) {
-                char * start_buf = buf + (i + ii) * 6000 + k * 6;
-
-                float ret[4] = {0.0};
-                ret[0] = (1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0') + 10 * (*(start_buf + 3) - '0') + (*(start_buf + 4) - '0'))  / 1000.0;
-                start_buf += 6;
-                ret[1] = (1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0') + 10 * (*(start_buf + 3) - '0') + (*(start_buf + 4) - '0'))  / 1000.0;
-                start_buf += 6;
-                ret[2] = (1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0') + 10 * (*(start_buf + 3) - '0') + (*(start_buf + 4) - '0'))  / 1000.0;
-                start_buf += 6;
-                ret[3] = (1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0') + 10 * (*(start_buf + 3) - '0') + (*(start_buf + 4) - '0'))  / 1000.0;
-
-                v_a[ii] = vld1q_f32(ret);
-                v_a[ii] = vsubq_f32(v_a[ii], v_b);
-
-                v_a1[ii] = vld1q_f32(ret);
-                v_a1[ii] = vsubq_f32(v_a1[ii], v_b1);
-
-
-
-                if (i == start_line && start_line == 0) {
-                    float32x4_t temp_c = v_a[ii];
-                    temp_c = v_b;
-                }
-
-            }
-
-            for (int ii = 0; ii < IB; ii++) {
-                temp[ii] = vmlaq_f32(temp[ii], v_a[ii], v_a[ii]);
-                temp1[ii] = vmlaq_f32(temp1[ii], v_a1[ii], v_a1[ii]);
-            }
-
-        }
-
-
-        for (int ii = 0; ii < IB; ii++) {
-            float32x4_t temp_c = temp[ii];
-            float32x4_t temp_c1 = temp1[ii];
-            float tmp0 = temp_c[0] + temp_c[1] + temp_c[2] + temp_c[3];
-            float tmp1 = temp_c1[0] + temp_c1[1] + temp_c1[2] + temp_c1[3];
-            res[i + ii] = (tmp0 < tmp1? 0: 1);
-
-        }
-
-
-    }
-
-
-
-#endif
 }
 
 
