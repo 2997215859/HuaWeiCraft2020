@@ -120,7 +120,7 @@ void Test (string answerFile, string predictFile) {
 
 
 
-void CalcTrainSum (char * buf, int start_line, int line_num, vector<float> & sum_label0, vector<float> & sum_label1, int & cnt_label0, int & cnt_label1) {
+void CalcTrainSum (char * buf, int start_line, int line_num, vector<int> & sum_label0, vector<int> & sum_label1, int & cnt_label0, int & cnt_label1) {
 
     buf += (start_line + line_num) * 6050; // 假设每行6050个字节，得到该块最后一行的中间某个位置
     while (*buf != '\n') buf++; // 跳到该块最后一个字符就，即该块最后一个换行符的位置
@@ -139,7 +139,7 @@ void CalcTrainSum (char * buf, int start_line, int line_num, vector<float> & sum
 
             buf -= 1; // 跳过逗号的位置
 
-            float ret = (1000 * (*(buf - 4) - '0') + 100 * (*(buf - 2) - '0'));
+            int ret = 100 * (*(buf - 2) - '0');
 
             buf -= 5; // 跳过浮点数的部分，来到逗号或者符号位的位置。如果是该行第一个数，则会来到上一行的换行符位置
             if (*buf == '-') {ret = -ret;buf--;} // 负数需要取反，并多移动一位
@@ -162,8 +162,9 @@ void CalcTrainSum (char * buf, int start_line, int line_num, vector<float> & sum
     }
 }
 
-vector<float> label0_means(features_num, 0.0);
-vector<float> label1_means(features_num, 0.0);
+vector<int> means_add(features_num, 0.0);
+vector<int> means_sub(features_num, 0.0);
+int C = 0;
 
 void Train (const string & filename) {
 
@@ -178,29 +179,29 @@ void Train (const string & filename) {
 
     close(fd);
 
-    vector<float> sum_label0_part0(features_num, 0.0);
-    vector<float> sum_label1_part0(features_num, 0.0);
+    vector<int> sum_label0_part0(features_num, 0.0);
+    vector<int> sum_label1_part0(features_num, 0.0);
     int cnt_label0_part0 = 0;
     int cnt_label1_part0 = 0;
 //    CalcTrainSum(buf, 0, 400, sum_label0_part0, sum_label1_part0, cnt_label0_part0, cnt_label1_part0);
     thread t0(CalcTrainSum, buf, 0, 400, ref(sum_label0_part0), ref(sum_label1_part0), ref(cnt_label0_part0), ref(cnt_label1_part0));
 
-    vector<float> sum_label0_part1(features_num, 0.0);
-    vector<float> sum_label1_part1(features_num, 0.0);
+    vector<int> sum_label0_part1(features_num, 0.0);
+    vector<int> sum_label1_part1(features_num, 0.0);
     int cnt_label0_part1 = 0;
     int cnt_label1_part1 = 0;
 //    CalcTrainSum(buf, 400, 400, sum_label0_part1, sum_label1_part1, cnt_label0_part1, cnt_label1_part1);
     thread t1(CalcTrainSum, buf, 400, 400, ref(sum_label0_part1), ref(sum_label1_part1), ref(cnt_label0_part1), ref(cnt_label1_part1));
 
-    vector<float> sum_label0_part2(features_num, 0.0);
-    vector<float> sum_label1_part2(features_num, 0.0);
+    vector<int> sum_label0_part2(features_num, 0.0);
+    vector<int> sum_label1_part2(features_num, 0.0);
     int cnt_label0_part2 = 0;
     int cnt_label1_part2 = 0;
 //    CalcTrainSum(buf, 800, 400, sum_label0_part2, sum_label1_part2, cnt_label0_part2, cnt_label1_part2);
     thread t2(CalcTrainSum, buf, 800, 400, ref(sum_label0_part2), ref(sum_label1_part2), ref(cnt_label0_part2), ref(cnt_label1_part2));
 
-    vector<float> sum_label0_part3(features_num, 0.0);
-    vector<float> sum_label1_part3(features_num, 0.0);
+    vector<int> sum_label0_part3(features_num, 0.0);
+    vector<int> sum_label1_part3(features_num, 0.0);
     int cnt_label0_part3 = 0;
     int cnt_label1_part3 = 0;
 //    CalcTrainSum(buf, 1200, 400, sum_label0_part3, sum_label1_part3, cnt_label0_part3, cnt_label1_part3);
@@ -214,8 +215,11 @@ void Train (const string & filename) {
     int cnt_label0 = cnt_label0_part0 + cnt_label0_part1 + cnt_label0_part2 + cnt_label0_part3;
     int cnt_label1 = cnt_label1_part0 + cnt_label1_part1 + cnt_label1_part2 + cnt_label1_part3;
     for (int i = 0; i < features_num; i++) {
-        label0_means[i] =  (sum_label0_part0[i] + sum_label0_part1[i] + sum_label0_part2[i] + sum_label0_part3[i]) / static_cast<float>(cnt_label0);
-        label1_means[i] = (sum_label1_part0[i] + sum_label1_part1[i] + sum_label1_part2[i] + sum_label1_part3[i]) / static_cast<float>(cnt_label1);
+        int a =  (sum_label0_part0[i] + sum_label0_part1[i] + sum_label0_part2[i] + sum_label0_part3[i]) / cnt_label0;
+        int b = (sum_label1_part0[i] + sum_label1_part1[i] + sum_label1_part2[i] + sum_label1_part3[i]) / cnt_label1;
+        means_add[i] = a + b;
+        means_sub[i] = b - a;
+        C = (a - b) * (a + b);
     }
 
 #ifdef TEST
@@ -233,17 +237,14 @@ void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
     int end_line = start_line + line_num;
     buf = buf + start_line * 6000;
     for (int i = start_line; i < end_line; i++) {
-        float norm0 = 0.0;
-        float norm1 = 0.0;
+        int norm_delta = 0;
         for (int j = 0; j < features_num; j++) {
-            float ret = 1000 * (*buf - '0') + 100 * (*(buf + 2) - '0');
-            float t1 = ret - label0_means[j];
-            float t2 = ret - label1_means[j];
-            norm0 += t1 * t1;
-            norm1 += t2 * t2;
+            int ret =  (*(buf + 2) - '0');
+            norm_delta += means_sub[j] * ret;
             buf += 6;
         }
-        res[i] = norm0 < norm1? 0: 1;
+        norm_delta = 200 * norm_delta + C;
+        res[i] = norm_delta < 0? 0: 1;
     }
 #else
 
@@ -253,55 +254,46 @@ void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
 
 
     for (i = start_line; i + IB < end_line; i += IB) {
-        float32x4_t temp[IB];
-        float32x4_t temp1[IB];
+        int32x4_t temp[IB];
         for (int ii = 0; ii < IB; ii++) {
-            temp[ii] = vdupq_n_f32(0.0f);
-            temp1[ii] = vdupq_n_f32(0.0f);
+            temp[ii] = vdupq_n_s32(0);
         }
 
 
         for (int k = 0; k < N; k += 4) {
 
-            float32x4_t v_b = vld1q_f32(&label0_means[k]);
-            float32x4_t v_b1 = vld1q_f32(&label1_means[k]);
+            int32x4_t v_b = vld1q_s32(&means_sub[k]);
 
-            float32x4_t v_a[IB];
-            float32x4_t v_a1[IB];
+            int32x4_t v_a[IB];
             for (int ii = 0; ii < IB; ii++) {
                 char * start_buf = buf + (i + ii) * 6000 + k * 6;
 
-                float ret[4] = {0.0};
-                ret[0] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+                int ret[4] = {0};
+                ret[0] = (*(start_buf + 2) - '0');
                 start_buf += 6;
-                ret[1] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+                ret[1] = (*(start_buf + 2) - '0');
                 start_buf += 6;
-                ret[2] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+                ret[2] = (*(start_buf + 2) - '0');
                 start_buf += 6;
-                ret[3] = 1000 * (*start_buf - '0') + 100 * (*(start_buf + 2) - '0');
+                ret[3] = (*(start_buf + 2) - '0');
 
-                v_a[ii] = vld1q_f32(ret);
-                v_a[ii] = vsubq_f32(v_a[ii], v_b);
-
-                v_a1[ii] = vld1q_f32(ret);
-                v_a1[ii] = vsubq_f32(v_a1[ii], v_b1);
+                v_a[ii] = vld1q_s32(ret);
 
             }
 
             for (int ii = 0; ii < IB; ii++) {
-                temp[ii] = vmlaq_f32(temp[ii], v_a[ii], v_a[ii]);
-                temp1[ii] = vmlaq_f32(temp1[ii], v_a1[ii], v_a1[ii]);
+                temp[ii] = vmlaq_s32(temp[ii], v_a[ii], v_b);
             }
 
         }
 
 
         for (int ii = 0; ii < IB; ii++) {
-            float32x4_t temp_c = temp[ii];
-            float32x4_t temp_c1 = temp1[ii];
-            float tmp0 = temp_c[0] + temp_c[1] + temp_c[2] + temp_c[3];
-            float tmp1 = temp_c1[0] + temp_c1[1] + temp_c1[2] + temp_c1[3];
-            res[i + ii] = (tmp0 < tmp1? 0: 1);
+            int32x4_t temp_c = temp[ii];
+            int32x2_t r = vadd_s32(vget_high_s32(temp_c),vget_low_s32(temp_c));// 两两相加
+
+            res[i + ii] = 200 * vget_lane_s32(vpadd_s32(r, r), 0) + C;
+            res[i + ii] = (res[i + ii] < 0)? 0: 1;
 
         }
 
