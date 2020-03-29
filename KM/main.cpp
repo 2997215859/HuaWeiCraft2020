@@ -334,7 +334,7 @@ void Predict (const string & test_file, const string & predict_file) {
 //    JudgePart(buf, 10000, 5000, res);
 //    JudgePart(buf, 15000, 5000, res);
 
-    int thread_num = 4;
+    int thread_num = 8;
     int cnt_per_thread = 20000 / thread_num;
     vector<thread> thread_vec;
     for (int i = 0; i < thread_num; i++) {
