@@ -28,8 +28,6 @@
 #include <unistd.h>
 #include <unordered_map>
 
-//#define CacheLineSize 64
-//#define IB CacheLineSize / sizeof(float)
 #define IB 8
 
 using namespace std;
@@ -183,28 +181,24 @@ void Train (const string & filename) {
     vector<int> sum_label1_part0(features_num, 0);
     short cnt_label0_part0 = 0;
     short cnt_label1_part0 = 0;
-//    CalcTrainSum(buf, 0, 400, sum_label0_part0, sum_label1_part0, cnt_label0_part0, cnt_label1_part0);
     thread t0(CalcTrainSum, buf, 0, 400, ref(sum_label0_part0), ref(sum_label1_part0), ref(cnt_label0_part0), ref(cnt_label1_part0));
 
     vector<int> sum_label0_part1(features_num, 0);
     vector<int> sum_label1_part1(features_num, 0);
     short cnt_label0_part1 = 0;
     short cnt_label1_part1 = 0;
-//    CalcTrainSum(buf, 400, 400, sum_label0_part1, sum_label1_part1, cnt_label0_part1, cnt_label1_part1);
     thread t1(CalcTrainSum, buf, 400, 400, ref(sum_label0_part1), ref(sum_label1_part1), ref(cnt_label0_part1), ref(cnt_label1_part1));
 
     vector<int> sum_label0_part2(features_num, 0);
     vector<int> sum_label1_part2(features_num, 0);
     short cnt_label0_part2 = 0;
     short cnt_label1_part2 = 0;
-//    CalcTrainSum(buf, 800, 400, sum_label0_part2, sum_label1_part2, cnt_label0_part2, cnt_label1_part2);
     thread t2(CalcTrainSum, buf, 800, 400, ref(sum_label0_part2), ref(sum_label1_part2), ref(cnt_label0_part2), ref(cnt_label1_part2));
 
     vector<int> sum_label0_part3(features_num, 0);
     vector<int> sum_label1_part3(features_num, 0);
     short cnt_label0_part3 = 0;
     short cnt_label1_part3 = 0;
-//    CalcTrainSum(buf, 1200, 400, sum_label0_part3, sum_label1_part3, cnt_label0_part3, cnt_label1_part3);
     thread t3(CalcTrainSum, buf, 1200, 400, ref(sum_label0_part3), ref(sum_label1_part3), ref(cnt_label0_part3), ref(cnt_label1_part3));
 
     t0.join();
@@ -302,9 +296,6 @@ void JudgePart (char * buf, int start_line, int line_num, vector<char> & res) {
             int16x8_t temp_c = temp[ii];
             short tmp = temp_c[0] + temp_c[1] + temp_c[2] + temp_c[3] + temp_c[4] + temp_c[5] + temp_c[6] + temp_c[7];
 
-//            int16x4_t part_sum4 = vadd_s16(vget_high_s16(temp_c),vget_low_s16(temp_c));// 两两相加
-//            float tmp = part_sum4[0] + part_sum4[1] + part_sum4[2] + part_sum4[3];
-
             res[i + ii] = (tmp + C < 0)? '0': '1';
 
         }
@@ -329,10 +320,6 @@ void Predict (const string & test_file, const string & predict_file) {
     close(fd);
 
     vector<char> res(20000, '1');
-//    JudgePart(buf, 0, 5000, res);
-//    JudgePart(buf, 5000, 5000, res);
-//    JudgePart(buf, 10000, 5000, res);
-//    JudgePart(buf, 15000, 5000, res);
 
     int thread_num = 8;
     int cnt_per_thread = 20000 / thread_num;
