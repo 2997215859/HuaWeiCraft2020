@@ -39,14 +39,14 @@ using namespace std;
 int features_num = 1000;
 
 
-void StorePredict(const vector<int> & predict_vec, const string & predict_file)
+void StorePredict(const vector<char> & predict_vec, const string & predict_file)
 {
 
     const int DATA_LEN = 2 * predict_vec.size();
     char * pData = new char[DATA_LEN];
     int j = 0;
     for (int i = 0; i < predict_vec.size(); i++) {
-        pData[j++] = predict_vec[i] + '0';
+        pData[j++] = predict_vec[i];
         pData[j++] = '\n';
     }
     int fd = open(predict_file.c_str(), O_RDWR | O_CREAT, 0777);
@@ -233,7 +233,7 @@ void Train (const string & filename) {
 
 
 
-void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
+void JudgePart (char * buf, int start_line, int line_num, vector<char> & res) {
 
 #ifdef NO_NEON
     int end_line = start_line + line_num;
@@ -246,13 +246,13 @@ void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
             buf += 6;
         }
         norm_delta = norm_delta + C;
-        res[i] = norm_delta < 0? 0: 1;
+        res[i] = norm_delta < 0? '0': '1';
     }
 #else
 
     int N = features_num;
     int i = 0;
-    int end_line = start_line + line_num;
+    int end_line = start_line + line_num - 50;
 
 
     for (i = start_line; i + IB < end_line; i += IB) {
@@ -304,8 +304,8 @@ void JudgePart (char * buf, int start_line, int line_num, vector<int> & res) {
 
 //            int16x4_t part_sum4 = vadd_s16(vget_high_s16(temp_c),vget_low_s16(temp_c));// 两两相加
 //            float tmp = part_sum4[0] + part_sum4[1] + part_sum4[2] + part_sum4[3];
-            res[i + ii] = tmp + C;
-            res[i + ii] = (res[i + ii] < 0)? 0: 1;
+
+            res[i + ii] = (tmp + C < 0)? '0': '1';
 
         }
 
@@ -328,7 +328,7 @@ void Predict (const string & test_file, const string & predict_file) {
     madvise(buf, 120000000, MADV_SEQUENTIAL);
     close(fd);
 
-    vector<int> res(20000, 0);
+    vector<char> res(20000, '1');
 //    JudgePart(buf, 0, 5000, res);
 //    JudgePart(buf, 5000, 5000, res);
 //    JudgePart(buf, 10000, 5000, res);
