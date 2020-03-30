@@ -252,7 +252,7 @@ void JudgePart (char * buf, int start_line, int line_num, vector<char> & res) {
 
     int N = features_num;
     int i = 0;
-    int end_line = start_line + line_num - 50;
+    int end_line = start_line + line_num;
 
 
     for (i = start_line; i + IB < end_line; i += IB) {

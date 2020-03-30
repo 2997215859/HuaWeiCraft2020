@@ -13,16 +13,6 @@ find_package(Threads REQUIRED)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lpthread")
 
 
-add_executable(hw_lr LR/main.cpp )
-target_link_libraries(hw_lr Threads::Threads)
-
-
-add_executable(hw_svr SVR/main.cpp)
-
-add_executable(hw_bp BP/main.cpp KM/main.cpp)
-target_link_libraries(hw_bp Threads::Threads)
-
-
 
 add_executable(hw_km KM/main.cpp )
 target_link_libraries(hw_km Threads::Threads)
