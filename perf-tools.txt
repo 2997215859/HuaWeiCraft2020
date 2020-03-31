@@ -1,0 +1,3 @@
+g++ -O3 -g main.cpp -o test -lpthread -D TEST
+sudo perf record -a -g ./test
+sudo perf report -i perf.data
